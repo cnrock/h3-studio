@@ -1,0 +1,53 @@
+# ============================================================
+# H3 Studio — K8s 部署：Namespace + ConfigMap（非敏感配置）
+# 敏感项（JWT_SECRET / SMTP_PASS / H3_API_KEY）放 secret.yaml
+# ============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: h3-studio
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: h3-studio-config
+  namespace: h3-studio
+data:
+  # ---- 运行形态 ----
+  DEPLOYMENT: "k8s"
+  PORT: "8787"
+  # 浏览器打开的地址，用于邮件里的激活/重置链接（改成你的对外地址）
+  PUBLIC_BASE_URL: "http://h3-studio.example.com"
+
+  # ---- MiniMax H3 后端（vLLM-Omni）----
+  # 内网自建 H3 地址；K8s 内可直接写内网 IP 或 Service 名
+  H3_BASE_URL: "http://192.0.2.10:8003"
+  # 可选：ref2va 专用后端（serve Ref2VA 分区的进程；留空则不启用多后端路由）
+  H3_BASE_URL_REF2VA: ""
+  H3_TIMEOUT_MS: "1800000"
+
+  # ---- 会话 ----
+  JWT_EXPIRES_IN: "30d"
+
+  # ---- 注册与邮箱 ----
+  SKIP_EMAIL_VERIFICATION: "false"
+  SMTP_HOST: "smtp.example.com"
+  SMTP_PORT: "25"
+  SMTP_SECURE: "false"
+  SMTP_REQUIRE_TLS: "false"
+  SMTP_USER: "no-reply@example.com"
+  SMTP_FROM: "no-reply@example.com"
+  SMTP_FROM_NAME: "H3 Studio"
+  SMTP_TLS_REJECT_UNAUTHORIZED: "false"
+
+  # ---- 上传限制 ----
+  MAX_IMAGE_MB: "30"
+  MAX_VIDEO_MB: "50"
+  MAX_FILES: "9"
+  PROMPT_CHARS: "7000"
+  MAX_DURATION_SEC: "1800"
+
+  # ---- 持久化路径（与 PVC 挂载一致）----
+  DATA_DIR: "/app/data"
+  DB_FILE: "/app/data/h3studio.db"
+  OUTPUTS_DIR: "/app/data/outputs"

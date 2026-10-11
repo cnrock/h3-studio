@@ -5,7 +5,7 @@
 
 - 参考站点交互：<https://pixo.video/zh/blog/minimax-h3-prompts>（提示词写法与场景）
 - 模型接口：vLLM-Omni 的 OpenAI 兼容视频 API（`/v1/videos/sync`）
-- 纯 Node.js + 内置 SQLite，**无需任何原生依赖**，三种部署形态开箱即用
+- 纯 Node.js + 内置 SQLite，**无需任何原生依赖**，四种部署形态开箱即用
 
 ---
 
@@ -64,6 +64,7 @@ h3-studio/
 ├─ public/          # 前端（原生 HTML/CSS/JS，无构建步骤）
 ├─ scripts/probe-h3.mjs   # 探测 H3 后端连通性
 ├─ deploy/          # systemd 单元 + Nginx 反代示例
+│  └─ k8s/          # K8s 全套清单（ConfigMap/Secret/PVC/Deployment/Service/Ingress）
 ├─ Dockerfile / docker-compose.yml
 ├─ env.internal.example / env.docker.example / env.vps.example
 ```
@@ -115,6 +116,22 @@ docker compose logs -f
 ```
 
 数据（SQLite、上传、生成的视频）持久化在 `./data`。
+
+---
+
+## 版本四：Kubernetes 部署
+
+一套完整清单，`kubectl apply -k deploy/k8s/` 部署。含 Namespace / ConfigMap / Secret /
+PVC / Deployment / Service / Ingress，镜像用官方发布的 `cnrock/h3-studio`（多架构 amd64+arm64，标签 `1.5.0`）。
+
+```bash
+# 先改三处：01-configmap.yaml（域名/H3 地址/SMTP）、02-secret.yaml（密钥）、06-ingress.yaml（域名）
+kubectl apply -k deploy/k8s/
+kubectl -n h3-studio get pods,svc,ingress
+```
+
+关键约束：**必须单副本**（队列进程内串行 + SQLite 单写）；视视频生成最长 30 分钟，
+Ingress 已用注解放宽读超时到 1800s；`/app/data` 挂 RWO PVC。详见 [`deploy/k8s/README.md`](deploy/k8s/README.md)。
 
 ---
 
@@ -215,6 +232,13 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 > 请先跑 `node scripts/probe-h3.mjs --gen` 做一次最小生成。
 
 ---
+
+## 界面（v1.5 · Apple 风格）
+
+参考 Apple 设计语言重构：浅色为主 / 深色为精致对偶、毛玻璃顶栏、胶囊按钮、大留白、
+精确字距与柔和多层阴影；登录页与应用页（生成表单、作品网格）统一。配色自动跟随系统深浅色。
+
+![应用界面](docs/screenshots/v1.0-app.png)
 
 ## 免责声明
 

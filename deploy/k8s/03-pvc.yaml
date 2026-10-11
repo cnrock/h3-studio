@@ -1,0 +1,18 @@
+# ============================================================
+# H3 Studio — K8s 部署：PVC（SQLite + 上传 + 生成的视频）
+# 单副本访问，用 RWO 即可。
+# ============================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: h3-studio-data
+  namespace: h3-studio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # 生成的视频会持续累积；按需调大，或为大型部署挂载独立大容量存储
+      storage: 20Gi
+  # 如集群有默认 StorageClass 可省略；否则指定：
+  # storageClassName: <your-storage-class>

@@ -1,0 +1,36 @@
+# ============================================================
+# H3 Studio — K8s 部署：Ingress（可选，需集群已装 ingress-nginx）
+#
+# ⚠️ 视频生成是长阻塞请求（最长 30 分钟）。ingress-nginx 默认
+#    proxy-read-timeout 只有 60s，会导致大时长生成被掐断。
+#    本项目已用注解放宽到 1800s。若用别的 Ingress 控制器，
+#    请对应放宽读超时与请求体上限。
+# ============================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: h3-studio
+  namespace: h3-studio
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "1800"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "1800"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: h3-studio.example.com      # 改成你的域名
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: h3-studio
+                port:
+                  number: 8787
+  # 如需 HTTPS（推荐）：
+  # tls:
+  #   - hosts: [h3-studio.example.com]
+  #     secretName: h3-studio-tls

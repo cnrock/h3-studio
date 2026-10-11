@@ -2,6 +2,10 @@
 
 H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到 `v2.0+`。
 
+## v1.5
+
+- 界面改版（Apple 风格，深浅色自适应）；新增 K8s 全套清单（deploy/k8s/）；镜像多架构发布（amd64+arm64）。
+
 ## v1.4
 
 - 修复拼接报 "Unrecognized option 'vsync'"：运行时探测 fps_mode/vsync，兼容全部 ffmpeg 版本。

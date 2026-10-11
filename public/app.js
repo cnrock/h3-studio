@@ -217,7 +217,7 @@ function jobCard(j) {
   const media =
     j.status === 'done' && j.videoUrl
       ? `<video src="${j.videoUrl}" controls preload="metadata"></video>`
-      : `<div style="aspect-ratio:16/9;display:grid;place-items:center;background:#0f131b;color:var(--muted);font-size:13px;text-align:center;padding:10px">
+      : `<div style="aspect-ratio:16/9;display:grid;place-items:center;background:var(--panel-2);color:var(--muted);font-size:13px;text-align:center;padding:10px">
            ${j.status === 'error' ? '生成失败' : `<div><span class="spinner"></span>${pending ? '<br>' + pending : ''}</div>`}
          </div>`;
   el.innerHTML = `
@@ -226,7 +226,7 @@ function jobCard(j) {
       <span class="badge ${j.status}">${badge}</span>
       <div class="prompt">${escapeHtml(j.prompt)}</div>
       <div class="muted">${j.mode} · ${j.params?.duration || '?'}s${j.bytes ? ' · ' + (j.bytes / 1048576).toFixed(1) + ' MB' : ''}</div>
-      ${j.error ? `<div class="muted" style="color:#ff9db0">${escapeHtml(j.error)}</div>` : ''}
+      ${j.error ? `<div class="muted" style="color:var(--danger)">${escapeHtml(j.error)}</div>` : ''}
       <div class="actions" style="margin-top:auto">
         ${j.videoUrl ? `<a href="${j.downloadUrl}" download><button class="ghost">下载</button></a>` : ''}
         ${j.status === 'error' ? `<button class="ghost" data-regen="${j.id}">重新生成</button>` : ''}

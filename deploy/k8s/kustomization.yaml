@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: h3-studio
+
+# 按顺序应用；secret 里的密钥请先改成真实值，或用 kubectl create secret 代替。
+resources:
+  - 01-configmap.yaml
+  - 02-secret.yaml
+  - 03-pvc.yaml
+  - 04-deployment.yaml
+  - 05-service.yaml
+  - 06-ingress.yaml
+
+# 一处改镜像 tag，全量生效：
+images:
+  - name: cnrock/h3-studio
+    newTag: "1.0.0"

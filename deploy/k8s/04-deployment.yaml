@@ -1,0 +1,73 @@
+# ============================================================
+# H3 Studio — K8s 部署：Deployment
+#
+# 关键点：
+#  - 必须单副本（replicas: 1）：任务队列在进程内串行、SQLite 单写，
+#    多副本会争用数据库并重复排队。
+#  - Recreate 策略：SQLite RWO PVC 不能被两副本同时挂载。
+#  - 长视频生成是长阻塞请求（最长 30 分钟），探针与 Ingress 超时要放宽。
+#  - 大量生成任务吃 CPU 做 ffmpeg 拼接，资源上限按机器规模调。
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: h3-studio
+  namespace: h3-studio
+  labels:
+    app: h3-studio
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: h3-studio
+  template:
+    metadata:
+      labels:
+        app: h3-studio
+    spec:
+      # 若你的 H3 后端在集群外的内网，容器需要能解析/访问该地址。
+      # 方式一：直连内网 IP（默认，已配在 ConfigMap 的 H3_BASE_URL）。
+      # 方式二：把 H3 后端部署在集群内，用 Service 名。
+      containers:
+        - name: h3-studio
+          image: cnrock/h3-studio:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8787
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: h3-studio-config
+            - secretRef:
+                name: h3-studio-secret
+          # 生成任务耗时较长，探针只探轻量 /api/health（不泄露后端地址）
+          startupProbe:
+            httpGet: { path: /api/health, port: http }
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: h3-studio-data
