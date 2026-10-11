@@ -178,14 +178,20 @@ async function concatSegments(segmentPaths, outPath) {
     normalized.push(begin);
   }
 
-  // 2) 拼接（此时各段时间戳已归零且编码参数一致，可安全流拷贝）
+  // 2) 拼接：必须【重新编码】。
+  //    即使各段已归一化（时间戳归零、CFR），`-c copy` 仍会因 AAC 编码器延时/
+  //    容器时长误差在段边界留下 0.02~0.07s 的间隙，浏览器播到该处会卡住。
+  //    实测：归一化+copy 有间隙；归一化+重编码 无间隙。
   const listFile = path.join(workDir, `concat-${Date.now()}.txt`);
   fs.writeFileSync(listFile, normalized.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
   try {
     await execFileP('ffmpeg', [
       '-y', '-loglevel', 'error',
       '-f', 'concat', '-safe', '0', '-i', listFile,
-      '-c', 'copy',
+      '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+      '-r', '24', '-vsync', 'cfr',
+      '-c:a', 'aac', '-b:a', '192k', '-ar', '32000', '-ac', '2',
+      '-af', 'aresample=async=1:first_pts=0',
       '-movflags', '+faststart',
       outPath,
     ], { maxBuffer: 1024 * 1024 * 16 });
