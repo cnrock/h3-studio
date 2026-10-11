@@ -101,7 +101,12 @@ export async function generateVideo(o) {
 
   const { boundary, body } = buildMultipart(fields, o.files ?? []);
 
-  const url = new URL(`${config.h3.baseUrl}/v1/videos/sync`);
+  // 按模式选后端：ref2va 需要单独的 Ref2VA 分区进程（若已配置）。
+  const useRef2va = o.mode === 'ref2va' && config.h3.ref2vaBaseUrl;
+  const baseUrl = useRef2va ? config.h3.ref2vaBaseUrl : config.h3.baseUrl;
+  const apiKey = useRef2va ? config.h3.ref2vaApiKey : config.h3.apiKey;
+
+  const url = new URL(`${baseUrl}/v1/videos/sync`);
   const isHttps = url.protocol === 'https:';
   const lib = isHttps ? https : http;
 
@@ -109,7 +114,7 @@ export async function generateVideo(o) {
     'Content-Type': `multipart/form-data; boundary=${boundary}`,
     'Content-Length': String(body.length),
   };
-  if (config.h3.apiKey) headers['Authorization'] = 'Bearer ' + config.h3.apiKey;
+  if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
 
   const { status, contentType, buffer } = await new Promise((resolve, reject) => {
     const req = lib.request(
@@ -150,9 +155,9 @@ export async function generateVideo(o) {
   return { bytes: buffer, contentType: contentType || 'video/mp4' };
 }
 
-export async function health() {
+export async function health(baseUrl) {
   return new Promise((resolve) => {
-    const url = new URL(`${config.h3.baseUrl}/health`);
+    const url = new URL(`${baseUrl || config.h3.baseUrl}/health`);
     const isHttps = url.protocol === 'https:';
     const lib = isHttps ? https : http;
     const req = lib.request(

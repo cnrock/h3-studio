@@ -311,3 +311,30 @@ v7 已**移除 undici 依赖**，改用 Node 内置 `http/https` 自行构造 mu
 
 网站已按上表自动选择字段名（`server/index.js`）。参考上限（H3 侧）：
 图片 ≤9、视频 ≤3、独立音频 ≤3、总数 ≤12；参考视频总时长 ≤15 秒。
+
+---
+
+## 三种模式全支持：多后端路由
+
+H3 每个服务进程只加载一个分区，分区决定可用任务：
+
+| serve 路径 | 支持任务 | 端口示例 |
+|---|---|---|
+| `.../FL2VA` + `--task-type fl2va` | `t2va`、`fl2va` | 8003 |
+| `.../Ref2VA` + `--task-type ref2va` | `ref2va` | 8004 |
+
+错误 `checkpoint partition 'ref2va' supports ['ref2va'], got task='t2va'` 就是
+「把 t2va 发给了只服务 ref2va 的后端」。
+
+**要三种模式全支持，跑两个 H3 服务，并在网站配置：**
+
+```ini
+# 默认后端（serve FL2VA 分区）：承载 t2va / fl2va
+H3_BASE_URL=http://<host>:8003
+# ref2va 专用后端（serve Ref2VA 分区）
+H3_BASE_URL_REF2VA=http://<host>:8004
+H3_REF2VA_API_KEY=          # 若该后端需要鉴权
+```
+
+网站会按 `mode` 自动路由：`ref2va` → `H3_BASE_URL_REF2VA`，其余 → `H3_BASE_URL`。
+若 `H3_BASE_URL_REF2VA` 留空，则所有任务都发往默认后端（旧行为，兼容单后端部署）。

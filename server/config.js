@@ -39,9 +39,18 @@ export const config = {
   skipEmailVerification: bool(process.env.SKIP_EMAIL_VERIFICATION, false),
 
   // ---- MiniMax H3 backend (vLLM-Omni) ----
+  //
+  // H3 的每个服务进程只加载一个分区，且分区决定能跑哪些任务：
+  //   serve FL2VA 子目录  -> 支持 t2va / fl2va
+  //   serve Ref2VA 子目录 -> 仅支持 ref2va
+  // 若只有一个后端（旧配置），所有任务都发到它；
+  // 若单独配置了 H3_BASE_URL_REF2VA，则 ref2va 走该后端，其余走默认后端。
   h3: {
     baseUrl: (process.env.H3_BASE_URL || 'http://192.0.2.10:8003').replace(/\/+$/, ''),
+    // 可选：ref2va 专用后端（serve Ref2VA 分区的进程）
+    ref2vaBaseUrl: (process.env.H3_BASE_URL_REF2VA || '').replace(/\/+$/, ''),
     apiKey: process.env.H3_API_KEY || '',
+    ref2vaApiKey: process.env.H3_REF2VA_API_KEY || process.env.H3_API_KEY || '',
     // sync endpoint blocks until the clip is fully generated
     timeoutMs: int(process.env.H3_TIMEOUT_MS, 30 * 60 * 1000),
   },

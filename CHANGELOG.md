@@ -2,6 +2,10 @@
 
 H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到 `v2.0+`。
 
+## v0.9
+
+- 三种模式全支持：多后端路由（FL2VA 分区承载 t2va/fl2va，Ref2VA 分区承载 ref2va）。
+
 ## v0.8
 
 - 修复 ref2va 参考字段名（input_references 单复数）错误。

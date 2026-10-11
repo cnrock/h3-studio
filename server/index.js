@@ -277,12 +277,23 @@ app.get('/api/health', (_req, res) => {
 
 // 详情：需登录，含 H3/SMTP 状态（供管理员排查）
 app.get('/api/health/detail', authMiddleware, async (_req, res) => {
-  const [mail, h3] = await Promise.all([verifyMailer(), h3Health()]);
+  const targets = [
+    { label: '默认后端(t2va/fl2va)', url: config.h3.baseUrl },
+  ];
+  if (config.h3.ref2vaBaseUrl) {
+    targets.push({ label: 'ref2va 后端', url: config.h3.ref2vaBaseUrl });
+  }
+  const [mail, ...h3Results] = await Promise.all([
+    verifyMailer(),
+    ...targets.map((t) => health(t.url)),
+  ]);
+  const h3 = targets.map((t, i) => ({ ...t, ...h3Results[i] }));
   res.json({
     ok: true,
     deployment: config.deployment,
     skipEmailVerification: config.skipEmailVerification,
     h3BaseUrl: config.h3.baseUrl,
+    h3Ref2vaBaseUrl: config.h3.ref2vaBaseUrl || null,
     h3,
     smtp: { host: config.smtp.host, port: config.smtp.port, ok: mail.ok, error: mail.error },
   });
