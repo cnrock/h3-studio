@@ -1,0 +1,81 @@
+# ============================================================
+# H3 Studio — K8s 部署（节点锁定版 / hostPath）
+#
+# 适用：把 h3-studio 固定跑在某一台能访问 H3 后端的节点上
+# （例如 Lustre 客户端节点 lustre-client-node），且不想依赖集群 StorageClass。
+#
+# 与 03-pvc.yaml + 04-deployment.yaml 二选一：
+#   用本文件：删除/不应用 03-pvc.yaml，改用 hostPath 卷。
+#   用 PVC ：保留 03-pvc.yaml + 04-deployment.yaml。
+#
+# 部署前必须先在目标节点上建好数据目录（见下方注释）。
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: h3-studio
+  namespace: h3-studio
+  labels:
+    app: h3-studio
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: h3-studio
+  template:
+    metadata:
+      labels:
+        app: h3-studio
+    spec:
+      # ① 锁定节点：把 Pod 固定到 lustre-client-node（改成你的节点名）
+      nodeSelector:
+        kubernetes.io/hostname: "lustre-client-node"
+      # ② 容忍该节点可能的污点（GPU / cordon 等）；不需要可删
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: h3-studio
+          image: cnrock/h3-studio:1.5.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8787
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: h3-studio-config
+            - secretRef:
+                name: h3-studio-secret
+          startupProbe:
+            httpGet: { path: /api/health, port: http }
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        # ③ hostPath：指向节点上预先建好的目录
+        #    先在 lustre-client-node 上执行：
+        #      sudo mkdir -p /data/h3-studio && sudo chown -R 0:0 /data/h3-studio
+        - name: data
+          hostPath:
+            path: /data/h3-studio
+            type: DirectoryOrCreate
