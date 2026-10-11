@@ -1,0 +1,16 @@
+services:
+  h3-studio:
+    build: .
+    image: h3-studio:local
+    container_name: h3-studio
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    env_file:
+      - .env
+    volumes:
+      # 持久化数据库、上传与生成的视频
+      - ./data:/app/data
+    extra_hosts:
+      # 让容器内可用 host.docker.internal 访问宿主机上的 H3 服务
+      - "host.docker.internal:host-gateway"

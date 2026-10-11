@@ -1,0 +1,17 @@
+[Unit]
+Description=H3 Studio (MiniMax H3 video generation site)
+After=network.target
+
+[Service]
+Type=simple
+# 改成实际的部署目录与运行用户
+WorkingDirectory=/opt/h3-studio
+EnvironmentFile=/opt/h3-studio/.env
+ExecStart=/usr/bin/node /opt/h3-studio/server/index.js
+Restart=always
+RestartSec=3
+# 生成的视频可能较大，放宽文件句柄
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

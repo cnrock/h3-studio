@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>H3 Studio · AI 视频生成</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><span class="dot"></span>H3 Studio <small>MiniMax H3 视频生成</small></div>
+    <div id="userbox" class="hidden" style="display:flex;gap:12px;align-items:center">
+      <span class="muted" id="useremail"></span>
+      <button class="ghost" id="logoutBtn">退出</button>
+    </div>
+  </header>
+
+  <!-- ============ AUTH ============ -->
+  <section id="authView">
+    <div class="card" style="max-width:440px;margin:40px auto">
+      <div class="tabs">
+        <button class="tab active" data-auth="login">登录</button>
+        <button class="tab" data-auth="register">注册</button>
+        <button class="tab" data-auth="forgot">找回密码</button>
+      </div>
+      <div id="authBanner" class="banner"></div>
+
+      <form id="loginForm">
+        <label>邮箱</label>
+        <input type="email" name="email" required placeholder="you@example.com" />
+        <label>密码</label>
+        <input type="password" name="password" required placeholder="至少 6 位" />
+        <div class="actions"><button type="submit">登录</button></div>
+      </form>
+
+      <form id="registerForm" class="hidden">
+        <label>邮箱</label>
+        <input type="email" name="email" required placeholder="you@example.com" />
+        <label>密码</label>
+        <input type="password" name="password" required minlength="6" placeholder="至少 6 位" />
+        <div class="actions"><button type="submit">注册</button></div>
+        <p class="muted" style="margin-top:12px">注册后需到邮箱点击激活链接才能登录。</p>
+      </form>
+
+      <form id="forgotForm" class="hidden">
+        <label>注册邮箱</label>
+        <input type="email" name="email" required placeholder="you@example.com" />
+        <div class="actions"><button type="submit">发送重置邮件</button></div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ============ APP ============ -->
+  <section id="appView" class="hidden">
+    <div class="card">
+      <h2>生成视频</h2>
+      <div id="genBanner" class="banner"></div>
+
+      <div class="tabs" id="modeTabs">
+        <button class="tab active" data-mode="t2va">文生视频</button>
+        <button class="tab" data-mode="fl2va">首尾帧</button>
+        <button class="tab" data-mode="ref2va">参考素材</button>
+      </div>
+      <p class="muted" id="modeHint"></p>
+
+      <label>提示词 <span class="muted" id="promptCount"></span></label>
+      <textarea id="prompt" placeholder="描述你想生成的画面：主体、动作、镜头运动、光线氛围……"></textarea>
+
+      <div id="dropZoneWrap">
+        <label id="fileLabel">参考文件</label>
+        <div class="drop" id="drop">点击或拖拽上传图片 / 视频<br /><span class="muted" id="fileHint"></span></div>
+        <input type="file" id="fileInput" multiple accept="image/*,video/*" class="hidden" />
+        <div class="thumbs" id="thumbs"></div>
+      </div>
+
+      <div class="row" style="margin-top:16px">
+        <div><label>时长（秒）</label><input type="number" id="duration" value="5" min="4" max="15" step="0.5" /></div>
+        <div><label>画幅比例</label>
+          <select id="aspect">
+            <option value="16:9">16:9</option><option value="9:16">9:16</option>
+            <option value="1:1">1:1</option><option value="4:3">4:3</option>
+            <option value="3:4">3:4</option><option value="21:9">21:9</option>
+          </select>
+        </div>
+        <div><label>分辨率</label>
+          <select id="resolution">
+            <option value="1344x768">768p (1344×768)</option>
+            <option value="2560x1440">2K (2560×1440)</option>
+            <option value="1024x576">576p (1024×576)</option>
+          </select>
+        </div>
+        <div><label>随机种子</label><input type="number" id="seed" placeholder="留空=随机" /></div>
+      </div>
+
+      <details style="margin-top:14px">
+        <summary class="muted" style="cursor:pointer">高级参数</summary>
+        <div class="row narrow" style="margin-top:10px">
+          <div><label>采样步数</label><input type="number" id="steps" value="50" min="1" max="100" /></div>
+          <div><label>flow_shift</label><input type="number" id="flowShift" value="12" step="0.1" /></div>
+          <div><label>audio_flow_shift</label><input type="number" id="audioFlowShift" value="3" step="0.1" /></div>
+          <div><label>帧率 fps</label><input type="number" id="fps" value="24" min="1" /></div>
+        </div>
+      </details>
+
+      <div class="actions">
+        <button id="generateBtn">开始生成</button>
+        <span class="muted" id="genNote"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>我的作品 <button class="ghost" id="refreshBtn" style="float:right;padding:6px 12px;font-size:12px">刷新</button></h2>
+      <div id="jobs" class="jobs"></div>
+      <div id="jobsEmpty" class="empty">还没有作品，生成一个试试吧。</div>
+    </div>
+  </section>
+
+  <footer class="foot">H3 Studio · 自建 MiniMax H3 (vLLM-Omni) · 仅供内部使用</footer>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

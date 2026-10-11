@@ -1,0 +1,22 @@
+{
+  "name": "h3-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MiniMax H3 视频生成站：邮箱注册/激活/登录，文生视频 + 首尾帧 + 参考素材（图/视频），调用自建 H3 接口。",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "probe": "node scripts/probe-h3.mjs"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.1",
+    "nodemailer": "^6.9.16"
+  }
+}

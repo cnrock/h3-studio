@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>重置密码 · H3 Studio</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="wrap">
+  <header class="top"><div class="brand"><span class="dot"></span>H3 Studio <small>重置密码</small></div></header>
+  <div class="card" style="max-width:440px;margin:40px auto">
+    <div id="banner" class="banner"></div>
+    <form id="resetForm">
+      <label>新密码</label>
+      <input type="password" id="password" required minlength="6" placeholder="至少 6 位" />
+      <label>确认新密码</label>
+      <input type="password" id="password2" required minlength="6" placeholder="再次输入" />
+      <div class="actions"><button type="submit">重置密码</button></div>
+    </form>
+    <p class="muted" style="margin-top:14px"><a href="/">返回首页</a></p>
+  </div>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const token = new URLSearchParams(location.search).get('token') || '';
+const banner = (m, t = 'err') => { const b = $('#banner'); b.textContent = m; b.className = 'banner show ' + t; };
+$('#resetForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const p1 = $('#password').value, p2 = $('#password2').value;
+  if (p1 !== p2) return banner('两次输入的密码不一致');
+  try {
+    const res = await fetch('/api/auth/reset', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, password: p1 }),
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || '重置失败');
+    banner('密码已重置，3 秒后跳转登录…', 'ok');
+    setTimeout(() => (location.href = '/'), 3000);
+  } catch (err) { banner(err.message); }
+};
+if (!token) banner('缺少重置令牌，请从邮件中的链接进入');
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+node_modules/
+data/
+.env
+*.log
+probe-output.mp4
+.CDS_
+.DS_Store
