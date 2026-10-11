@@ -1,21 +1,20 @@
-import { fetch as uFetch, Agent } from 'undici';
+import http from 'node:http';
+import https from 'node:https';
+import crypto from 'node:crypto';
 import { config } from './config.js';
-
-// Node 内置 fetch（undici）默认 headersTimeout=300s、bodyTimeout=300s，
-// H3 单段生成常需 4~6 分钟，会在 300 秒被掐断（UND_ERR_HEADERS_TIMEOUT）。
-// 这里用独立 Agent，把两个超时都放宽到 config.h3.timeoutMs。
-const h3Agent = new Agent({
-  headersTimeout: config.h3.timeoutMs,
-  bodyTimeout: config.h3.timeoutMs,
-  connectTimeout: 60_000,
-  keepAliveTimeout: 60_000,
-});
 
 /**
  * Build and send a MiniMax H3 (vLLM-Omni) video request.
  *
  * Endpoint: POST {H3_BASE_URL}/v1/videos/sync  (multipart/form-data)
  * Blocks until generation finishes and returns raw MP4 bytes.
+ *
+ * 实现说明（重要）：
+ *   不用 Node 内置 fetch —— 它的 undici 默认 headersTimeout=300s，长视频单段
+ *   要 4~6 分钟，会在 300 秒被掐断（UND_ERR_HEADERS_TIMEOUT）。
+ *   也不引入 undici npm 包 —— 它与 Node 内置的 FormData 不兼容（会被当成
+ *   普通对象字符串化成 "[object FormData]"，导致 H3 报 body.prompt missing）。
+ *   这里直接用内置 http/https 自己拼 multipart，超时完全可控，无额外依赖。
  *
  * Mode mapping:
  *   - t2va : text only                          -> no reference files
@@ -35,6 +34,35 @@ function extraParams(obj) {
 
 const ASPECTS = new Set(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'Auto']);
 
+/** 构造 multipart/form-data 请求体（Buffer） */
+function buildMultipart(fields, files) {
+  const boundary = '----H3Studio' + crypto.randomBytes(16).toString('hex');
+  const parts = [];
+
+  const push = (s) => parts.push(Buffer.isBuffer(s) ? s : Buffer.from(s, 'utf8'));
+
+  for (const [name, value] of Object.entries(fields)) {
+    if (value === undefined || value === null) continue;
+    push(`--${boundary}\r\n`);
+    push(`Content-Disposition: form-data; name="${name}"\r\n\r\n`);
+    push(String(value));
+    push('\r\n');
+  }
+
+  for (const f of files) {
+    push(`--${boundary}\r\n`);
+    push(
+      `Content-Disposition: form-data; name="${f.field}"; filename="${f.filename || 'file'}"\r\n`,
+    );
+    push(`Content-Type: ${f.mimetype || 'application/octet-stream'}\r\n\r\n`);
+    push(f.buffer);
+    push('\r\n');
+  }
+
+  push(`--${boundary}--\r\n`);
+  return { boundary, body: Buffer.concat(parts) };
+}
+
 /**
  * @param {object} o
  * @param {string} o.prompt
@@ -52,84 +80,96 @@ const ASPECTS = new Set(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'Auto']);
  * @returns {Promise<{bytes:Buffer, contentType:string}>}
  */
 export async function generateVideo(o) {
-  const fd = new FormData();
+  const fields = {
+    prompt: o.prompt ?? '',
+    width: String(o.width),
+    height: String(o.height),
+    fps: String(o.fps ?? 24),
+    num_inference_steps: String(o.steps ?? 50),
+    flow_shift: String(o.flowShift ?? 12),
+  };
+  if (o.aspectRatio && ASPECTS.has(o.aspectRatio)) fields.aspect_ratio = o.aspectRatio;
+  if (Number.isFinite(o.seed)) fields.seed = String(o.seed);
 
-  fd.set('prompt', o.prompt ?? '');
-  fd.set('width', String(o.width));
-  fd.set('height', String(o.height));
-  if (o.aspectRatio && ASPECTS.has(o.aspectRatio)) fd.set('aspect_ratio', o.aspectRatio);
-  fd.set('fps', String(o.fps ?? 24));
-  fd.set('num_inference_steps', String(o.steps ?? 50));
-  fd.set('flow_shift', String(o.flowShift ?? 12));
-  if (Number.isFinite(o.seed)) fd.set('seed', String(o.seed));
-
-  // duration is required; clamp to the model's 4–15 s window.
+  // duration is required; H3 accepts 4–15 s per single generation.
   const duration = Math.min(15, Math.max(4, Number(o.duration) || 5));
-  fd.set(
-    'extra_params',
-    extraParams({
-      task: o.mode,
-      duration,
-      audio_flow_shift: o.audioFlowShift ?? 3.0,
-    }),
-  );
+  fields.extra_params = extraParams({
+    task: o.mode,
+    duration,
+    audio_flow_shift: o.audioFlowShift ?? 3.0,
+  });
 
-  for (const f of o.files ?? []) {
-    const blob = new Blob([f.buffer], { type: f.mimetype || 'application/octet-stream' });
-    fd.append(f.field, blob, f.filename || 'reference');
-  }
+  const { boundary, body } = buildMultipart(fields, o.files ?? []);
 
-  const url = `${config.h3.baseUrl}/v1/videos/sync`;
-  const headers = {};
-  if (config.h3.apiKey) headers.Authorization = `Bearer ${config.h3.apiKey}`;
+  const url = new URL(`${config.h3.baseUrl}/v1/videos/sync`);
+  const isHttps = url.protocol === 'https:';
+  const lib = isHttps ? https : http;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.h3.timeoutMs);
+  const headers = {
+    'Content-Type': `multipart/form-data; boundary=${boundary}`,
+    'Content-Length': String(body.length),
+  };
+  if (config.h3.apiKey) headers['Authorization'] = 'Bearer ' + config.h3.apiKey;
 
-  let res;
-  try {
-    res = await uFetch(url, {
-      method: 'POST',
-      headers,
-      body: fd,
-      signal: controller.signal,
-      dispatcher: h3Agent,
-    });
-  } catch (err) {
-    clearTimeout(timer);
-    if (err.name === 'AbortError') throw new Error(`H3 请求超时（>${config.h3.timeoutMs} ms）`);
-    const code = err.cause?.code || '';
-    if (code === 'UND_ERR_HEADERS_TIMEOUT' || code === 'UND_ERR_BODY_TIMEOUT') {
-      throw new Error(`H3 响应超时（${code}）——后端仍在生成，可稍后重试或调大 H3_TIMEOUT_MS`);
-    }
-    throw new Error(`无法连接 H3 后端 ${url}：${err.message}${code ? ' (' + code + ')' : ''}`);
-  }
-  clearTimeout(timer);
+  const { status, contentType, buffer } = await new Promise((resolve, reject) => {
+    const req = lib.request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname + url.search,
+        method: 'POST',
+        headers,
+        timeout: config.h3.timeoutMs, // 含连接、发送、等待响应（Node 会在超时后销毁 socket）
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () =>
+          resolve({
+            status: res.statusCode,
+            contentType: res.headers['content-type'] || '',
+            buffer: Buffer.concat(chunks),
+          }),
+        );
+      },
+    );
+    req.on('timeout', () => req.destroy(new Error(`H3 请求超时（>${config.h3.timeoutMs} ms）`)));
+    req.on('error', reject);
+    req.end(body);
+  });
 
-  const contentType = res.headers.get('content-type') || '';
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`H3 返回 ${res.status}：${text.slice(0, 500)}`);
+  const text = () => buffer.toString('utf8').slice(0, 500);
+
+  if (status < 200 || status >= 300) {
+    throw new Error(`H3 返回 ${status}：${text()}`);
   }
   if (!contentType.includes('video') && !contentType.includes('octet-stream')) {
-    // Some deployments return JSON on error with 200.
-    const text = await res.text().catch(() => '');
-    throw new Error(`H3 未返回视频（content-type=${contentType}）：${text.slice(0, 300)}`);
+    throw new Error(`H3 未返回视频（content-type=${contentType}）：${text().slice(0, 300)}`);
   }
-
-  const arrayBuf = await res.arrayBuffer();
-  return { bytes: Buffer.from(arrayBuf), contentType: contentType || 'video/mp4' };
+  return { bytes: buffer, contentType: contentType || 'video/mp4' };
 }
 
 export async function health() {
-  try {
-    const res = await uFetch(`${config.h3.baseUrl}/health`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(10_000),
-      dispatcher: h3Agent,
-    });
-    return { ok: res.ok, status: res.status };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  return new Promise((resolve) => {
+    const url = new URL(`${config.h3.baseUrl}/health`);
+    const isHttps = url.protocol === 'https:';
+    const lib = isHttps ? https : http;
+    const req = lib.request(
+      {
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname,
+        method: 'GET',
+        timeout: 10_000,
+      },
+      (res) => {
+        res.resume();
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode });
+      },
+    );
+    req.on('timeout', () => req.destroy(new Error('health timeout')));
+    req.on('error', (err) => resolve({ ok: false, error: err.message }));
+    req.end();
+  });
 }

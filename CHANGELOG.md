@@ -2,6 +2,10 @@
 
 H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到 `v2.0+`。
 
+## v0.7
+
+- 移除 undici，改用 Node 内置 http/https 自建 multipart，修复 prompt 丢失与超时。
+
 ## v0.6
 
 - 修复长视频约 300 秒被 undici 超时掐断；逐段重试。

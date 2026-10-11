@@ -258,3 +258,37 @@ H3 单段 12~13 秒视频要 4~6 分钟，第 1 段（≈262s）能过，第 2 �
 - 抽取上段末帧失败时，自动退化为纯文本续写，不中断整条流程
 
 > K8s 侧无需改动：`VLLM_OMNI_VIDEO_SYNC_TIMEOUT=14400` 已足够，问题在网站客户端超时。
+
+---
+
+## 错误排查：ref2va 报错 / prompt 丢失
+
+### 1) `checkpoint partition 'fl2va' supports ['fl2va','t2va'], got task='ref2va'`
+这是 **H3 服务端（K8s）配置问题**，与本网站无关。
+
+原因：`vllm serve` 命令里带了 `--task-type fl2va`，只加载了 FL2VA 一个 DiT；
+参考素材（ref2va）需要 Ref2VA 那个 DiT，因此被拒绝。
+
+修复（改 deployment 的 args）：
+- **去掉 `--task-type fl2va`**，让服务同时加载两个 DiT（180GB 卡足够）；
+- serve 路径指向**仓库根目录**，而不是 `FL2VA/` 子目录。
+
+```yaml
+args:
+  - |
+    exec vllm serve /data/serving-model/MiniMax-H3 \
+      --omni \
+      --host 0.0.0.0 --port 8003 \
+      --trust-remote-code --served-model-name minimax-h3 \
+      # ...其余参数不变，注意【不要】再加 --task-type
+```
+
+服务重启后 `{"task":"ref2va"}` 即可正常调用。
+
+### 2) `body.prompt Field required, input: 'None'`
+这是 **v6 的代码缺陷**（v7 已修）：v6 为实现长超时引入了 `undici` npm 包，
+它与 Node 内置的 `FormData` 不兼容——请求体被当成普通对象字符串化成
+`[object FormData]`（仅 17 字节），H3 收不到任何字段。
+
+v7 已**移除 undici 依赖**，改用 Node 内置 `http/https` 自行构造 multipart，
+超时仍完全可控，且无额外依赖。

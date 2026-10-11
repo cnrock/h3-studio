@@ -130,21 +130,63 @@ async function extractLastFrame(mp4Path, outPng) {
   return outPng;
 }
 
+/**
+ * 把一段视频归一化：时间戳从 0 开始、固定帧率 CFR、音频重采样到统一采样率。
+ * 这是保证拼接后时间轴连续的关键——H3 各段的起始时间戳/帧率/音频延迟并不一致，
+ * 直接 `-c copy` 拼接会在段边界留下间隙，浏览器播放到边界即卡住。
+ */
+async function normalizeSegment(input, output, { withAudio }) {
+  const args = [
+    '-y', '-loglevel', 'error',
+    '-i', input,
+    '-vf', 'setpts=PTS-STARTPTS',
+    '-r', '24', '-fps_mode', 'cfr',
+    '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+  ];
+  if (withAudio) {
+    args.push(
+      '-af', 'aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS',
+      '-c:a', 'aac', '-b:a', '192k', '-ar', '32000', '-ac', '2',
+    );
+  } else {
+    args.push('-an');
+  }
+  args.push('-movflags', '+faststart', output);
+  await execFileP('ffmpeg', args, { maxBuffer: 1024 * 1024 * 16 });
+  return output;
+}
+
 async function concatSegments(segmentPaths, outPath) {
-  const listFile = path.join(path.dirname(outPath), `concat-${Date.now()}.txt`);
-  fs.writeFileSync(listFile, segmentPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
+  const workDir = path.dirname(outPath);
+  const normalized = [];
+
+  // 1) 逐段归一化
+  for (let i = 0; i < segmentPaths.length; i++) {
+    const out = path.join(workDir, `norm-${String(i + 1).padStart(2, '0')}.mp4`);
+    let begin = segmentPaths[i];
+    try {
+      await normalizeSegment(begin, out, { withAudio: true });
+      begin = out;
+    } catch (err) {
+      // 某段无音轨等异常：仅归一化视频
+      console.warn(`⚠️ 第 ${i + 1} 段音频归一化失败，退回仅视频：${err.message}`);
+      await normalizeSegment(begin, out, { withAudio: false });
+      begin = out;
+    }
+    normalized.push(begin);
+  }
+
+  // 2) 拼接（此时各段时间戳已归零且编码参数一致，可安全流拷贝）
+  const listFile = path.join(workDir, `concat-${Date.now()}.txt`);
+  fs.writeFileSync(listFile, normalized.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
   try {
     await execFileP('ffmpeg', [
       '-y', '-loglevel', 'error',
       '-f', 'concat', '-safe', '0', '-i', listFile,
-      '-c', 'copy', outPath,
-    ]);
-  } catch {
-    await execFileP('ffmpeg', [
-      '-y', '-loglevel', 'error',
-      '-f', 'concat', '-safe', '0', '-i', listFile,
-      '-c:v', 'libx264', '-c:a', 'aac', '-pix_fmt', 'yuv420p', outPath,
-    ]);
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      outPath,
+    ], { maxBuffer: 1024 * 1024 * 16 });
   } finally {
     try { fs.unlinkSync(listFile); } catch {}
   }
