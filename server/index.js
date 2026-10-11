@@ -9,7 +9,7 @@ import {
   checkPassword, createUser, findUserByEmail, findUserById, publicUser,
   resetPassword, setResetToken, signToken, verifyByToken, authMiddleware,
 } from './auth.js';
-import { createJob, deleteJob, enqueue, getJob, listJobs } from './jobs.js';
+import { createJob, deleteJob, enqueue, getJob, listJobs, regenerateJob } from './jobs.js';
 
 fs.mkdirSync(config.dataDir, { recursive: true });
 const uploadsDir = path.join(config.dataDir, 'uploads');
@@ -264,6 +264,17 @@ app.get('/api/jobs/:id/download', authMiddleware, (req, res) => {
   if (!job || !job.videoUrl) return res.status(404).json({ error: '视频未就绪' });
   res.download(path.join(config.outputsDir, `${job.id}.mp4`), `h3-${job.id.slice(0, 8)}.mp4`);
 });
+app.post('/api/jobs/:id/regenerate', authMiddleware, (req, res) => {
+  const r = regenerateJob(req.params.id, req.user.id);
+  if (r.ok) return res.json({ ok: true });
+  if (r.reason === 'not_found') return res.status(404).json({ error: '任务不存在' });
+  if (r.reason === 'busy') return res.status(409).json({ error: '任务正在排队或生成中' });
+  if (r.reason === 'files_missing') {
+    return res.status(409).json({ error: '参考文件已不在，请重新上传后再提交' });
+  }
+  res.status(400).json({ error: '无法重新生成' });
+});
+
 app.delete('/api/jobs/:id', authMiddleware, (req, res) => {
   const ok = deleteJob(req.params.id, req.user.id);
   res.json({ ok });

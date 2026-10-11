@@ -229,6 +229,7 @@ function jobCard(j) {
       ${j.error ? `<div class="muted" style="color:#ff9db0">${escapeHtml(j.error)}</div>` : ''}
       <div class="actions" style="margin-top:auto">
         ${j.videoUrl ? `<a href="${j.downloadUrl}" download><button class="ghost">下载</button></a>` : ''}
+        ${j.status === 'error' ? `<button class="ghost" data-regen="${j.id}">重新生成</button>` : ''}
         <button class="danger" data-del="${j.id}">删除</button>
       </div>
     </div>`;
@@ -237,6 +238,21 @@ function jobCard(j) {
     await api(`/api/jobs/${j.id}`, { method: 'DELETE' });
     loadJobs();
   };
+  const regenBtn = el.querySelector('[data-regen]');
+  if (regenBtn) {
+    regenBtn.onclick = async () => {
+      regenBtn.disabled = true;
+      regenBtn.textContent = '提交中…';
+      try {
+        await api(`/api/jobs/${j.id}/regenerate`, { method: 'POST' });
+        loadJobs();
+      } catch (err) {
+        alert(err.message || '重新生成失败');
+        regenBtn.disabled = false;
+        regenBtn.textContent = '重新生成';
+      }
+    };
+  }
   return el;
 }
 

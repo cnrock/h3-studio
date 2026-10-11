@@ -37,8 +37,30 @@ export function deleteJob(id, userId) {
   if (row.output_file) {
     try { fs.unlinkSync(path.join(config.outputsDir, row.output_file)); } catch {}
   }
+  cleanupFiles(safeJson(row.params_json));
   db.prepare('DELETE FROM jobs WHERE id = ?').run(id);
   return true;
+}
+
+/**
+ * 重新生成：把失败/已完成的任务重置为排队，并重新入队。
+ * 参考文件在失败时被保留（见 runJob），因此无需用户重新走一遍上传流程。
+ * 若文件已丢失（例如曾被删除或重启后清理），返回 {ok:false, reason:'files_missing'}。
+ */
+export function regenerateJob(id, userId) {
+  const row = db.prepare('SELECT * FROM jobs WHERE id = ? AND user_id = ?').get(id, userId);
+  if (!row) return { ok: false, reason: 'not_found' };
+  if (row.status === 'running' || row.status === 'queued') {
+    return { ok: false, reason: 'busy' };
+  }
+  const params = safeJson(row.params_json);
+  // 参考文件是否仍在
+  for (const f of params.files || []) {
+    if (f.path && !fs.existsSync(f.path)) return { ok: false, reason: 'files_missing' };
+  }
+  setStatus(id, 'queued', { error: null, progress: null });
+  enqueue(id);
+  return { ok: true };
 }
 
 function hydrate(row) {
@@ -144,8 +166,9 @@ async function runJob(jobId) {
       if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 3000));
     }
   }
+  // 失败时【不】清理参考文件，以便用户点「重新生成」直接复用；
+  // 文件会在删除该任务（deleteJob）时一并清理。
   setStatus(jobId, 'error', { error: String(lastErr?.message || lastErr) });
-  cleanupFiles(params);
 }
 
 function cleanupFiles(params) {
