@@ -2,6 +2,10 @@
 
 H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到 `v2.0+`。
 
+## v0.4
+
+- 修复长视频后段重复：分镜脚本自动逐段演绎。
+
 ## v0.3
 
 - 修复旧 Docker 下容器启动即 core dump（改用 node:22-bullseye-slim 避开 clone3）。
