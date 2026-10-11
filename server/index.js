@@ -234,7 +234,7 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
       flowShift: num(req.body.flow_shift, 12),
       seed: req.body.seed === '' || req.body.seed === undefined ? undefined : Number(req.body.seed),
       // 时长允许 4–120 秒；超过 15 秒时后端自动分段续写并拼接
-      duration: Math.max(4, Math.min(num(req.body.duration, 5), 120)),
+      duration: Math.max(4, Math.min(num(req.body.duration, 5), config.limits.maxDurationSec)),
       audioFlowShift: num(req.body.audio_flow_shift, 3.0),
       files: files.filter((f) => f.path).map((f) => ({ field: f.field, filename: f.filename, path: f.path, mimetype: f.mimetype })),
       jsonRefs: files.filter((f) => f.inline).map((f) => ({ field: f.field, value: f.inline })),

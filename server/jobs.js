@@ -137,7 +137,7 @@ async function runJob(jobId) {
   let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const { bytes, segments, seconds } = await generateLongVideo({
+      const { filePath, segments, seconds } = await generateLongVideo({
         prompt: row.prompt,
         mode: row.mode,
         width: params.width,
@@ -152,11 +152,18 @@ async function runJob(jobId) {
         files,
         onProgress: (p) => setStatus(jobId, 'running', { progress: JSON.stringify(p) }),
       });
+      // 成片直接落盘到 outputs（避免整片读进内存）
       const fileName = `${jobId}.mp4`;
-      fs.writeFileSync(path.join(config.outputsDir, fileName), bytes);
+      const dest = path.join(config.outputsDir, fileName);
+      try {
+        fs.renameSync(filePath, dest);
+      } catch {
+        fs.copyFileSync(filePath, dest);
+        try { fs.unlinkSync(filePath); } catch {}
+      }
       setStatus(jobId, 'done', {
         output_file: fileName,
-        output_bytes: bytes.length,
+        output_bytes: fs.statSync(dest).size,
         progress: JSON.stringify({ stage: 'done', segments, seconds }),
       });
       cleanupFiles(params);

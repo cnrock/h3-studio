@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { generateVideo } from './h3.js';
@@ -246,7 +247,10 @@ export async function generateLongVideo(o) {
   if (plans.length <= 1) {
     onProgress({ stage: 'video', current: 1, total: 1 });
     const { bytes } = await generateVideo({ ...o, prompt: plans[0].prompt, duration: plans[0].duration });
-    return { bytes, segments: 1, seconds: plans[0].duration };
+    // 写入临时文件后返回路径，避免把整片常驻内存
+    const singlePath = path.join(os.tmpdir(), `h3-out-${crypto.randomUUID()}.mp4`);
+    fs.writeFileSync(singlePath, bytes);
+    return { filePath: singlePath, segments: 1, seconds: plans[0].duration };
   }
 
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'h3-long-'));
@@ -321,8 +325,11 @@ export async function generateLongVideo(o) {
     onProgress({ stage: 'concat', current: plans.length, total: plans.length });
     const outPath = path.join(workDir, 'final.mp4');
     await concatSegments(segPaths, outPath);
-    const bytes = fs.readFileSync(outPath);
-    return { bytes, segments: plans.length, seconds: plans.reduce((a, p) => a + p.duration, 0), storyboard: !!storyboard };
+    // 把成片移出 workDir（workDir 会在 finally 被删），返回路径而非字节，
+    // 避免长视频（可能数百 MB~数 GB）整块读进内存。
+    const finalPath = path.join(os.tmpdir(), `h3-out-${crypto.randomUUID()}.mp4`);
+    fs.renameSync(outPath, finalPath);
+    return { filePath: finalPath, segments: plans.length, seconds: plans.reduce((a, p) => a + p.duration, 0), storyboard: !!storyboard };
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
   }
