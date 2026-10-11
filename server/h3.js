@@ -1,4 +1,15 @@
+import { fetch as uFetch, Agent } from 'undici';
 import { config } from './config.js';
+
+// Node 内置 fetch（undici）默认 headersTimeout=300s、bodyTimeout=300s，
+// H3 单段生成常需 4~6 分钟，会在 300 秒被掐断（UND_ERR_HEADERS_TIMEOUT）。
+// 这里用独立 Agent，把两个超时都放宽到 config.h3.timeoutMs。
+const h3Agent = new Agent({
+  headersTimeout: config.h3.timeoutMs,
+  bodyTimeout: config.h3.timeoutMs,
+  connectTimeout: 60_000,
+  keepAliveTimeout: 60_000,
+});
 
 /**
  * Build and send a MiniMax H3 (vLLM-Omni) video request.
@@ -77,11 +88,21 @@ export async function generateVideo(o) {
 
   let res;
   try {
-    res = await fetch(url, { method: 'POST', headers, body: fd, signal: controller.signal });
+    res = await uFetch(url, {
+      method: 'POST',
+      headers,
+      body: fd,
+      signal: controller.signal,
+      dispatcher: h3Agent,
+    });
   } catch (err) {
     clearTimeout(timer);
     if (err.name === 'AbortError') throw new Error(`H3 请求超时（>${config.h3.timeoutMs} ms）`);
-    throw new Error(`无法连接 H3 后端 ${url}：${err.message}`);
+    const code = err.cause?.code || '';
+    if (code === 'UND_ERR_HEADERS_TIMEOUT' || code === 'UND_ERR_BODY_TIMEOUT') {
+      throw new Error(`H3 响应超时（${code}）——后端仍在生成，可稍后重试或调大 H3_TIMEOUT_MS`);
+    }
+    throw new Error(`无法连接 H3 后端 ${url}：${err.message}${code ? ' (' + code + ')' : ''}`);
   }
   clearTimeout(timer);
 
@@ -102,7 +123,11 @@ export async function generateVideo(o) {
 
 export async function health() {
   try {
-    const res = await fetch(`${config.h3.baseUrl}/health`, { method: 'GET' });
+    const res = await uFetch(`${config.h3.baseUrl}/health`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(10_000),
+      dispatcher: h3Agent,
+    });
     return { ok: res.ok, status: res.status };
   } catch (err) {
     return { ok: false, error: err.message };

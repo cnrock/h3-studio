@@ -237,3 +237,24 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 3. **上 HTTPS**：公网部署务必用 Nginx + Let's Encrypt，并设 `ENABLE_HSTS=true`
    （同时会自动给 Cookie 加 `Secure`）
 4. 生产环境设置 `SKIP_EMAIL_VERIFICATION=false`，并保证 SMTP 可用
+
+---
+
+## 长视频失败的排查（重要）
+
+若长视频（>15 秒）在后段失败并**从头重跑**，看 H3 日志会发现：每段生成其实都成功了，
+但客户端在第 2 段（约 300 秒处）就报错重试。
+
+**根因**：Node 内置 `fetch`（undici）的 **`headersTimeout` 默认 300 秒**。
+H3 单段 12~13 秒视频要 4~6 分钟，第 1 段（≈262s）能过，第 2 段（≈325s）就被 undici
+掐断，报 `UND_ERR_HEADERS_TIMEOUT`，触发重试。
+
+**修复**：`server/h3.js` 用独立 `undici.Agent`，把 `headersTimeout`/`bodyTimeout`
+放宽到 `H3_TIMEOUT_MS`（默认 30 分钟）。仅设 `AbortController` 是无效的——两者是
+独立超时。
+
+其余加固：
+- 长视频改为**逐段重试**（只重跑失败段，已成功段复用），不再整条从头重跑
+- 抽取上段末帧失败时，自动退化为纯文本续写，不中断整条流程
+
+> K8s 侧无需改动：`VLLM_OMNI_VIDEO_SYNC_TIMEOUT=14400` 已足够，问题在网站客户端超时。

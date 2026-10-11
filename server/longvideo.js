@@ -207,33 +207,54 @@ export async function generateLongVideo(o) {
       const p = plans[i];
       onProgress({ stage: 'segment', current: i + 1, total: plans.length, seconds: p.duration });
 
-      const files = [];
-      if (p.usePrevFrame) {
-        const lastFrame = await extractLastFrame(segPaths[i - 1], path.join(workDir, `last-${i}.png`));
-        files.push({
-          field: 'input_reference',
-          filename: `last-${i}.png`,
-          mimetype: 'image/png',
-          buffer: fs.readFileSync(lastFrame),
-        });
-      } else if (o.files?.length) {
-        files.push(...o.files);
-      }
+      // 逐段重试：只重跑失败的那一段，已成功的段不重做
+      let bytes;
+      let lastErr;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const files = [];
+          let usePrev = p.usePrevFrame;
+          if (usePrev) {
+            // 抽上一段末帧作首帧；抽帧失败则退化为纯文本续写，不让整条失败
+            try {
+              const lastFrame = await extractLastFrame(segPaths[i - 1], path.join(workDir, `last-${i}.png`));
+              files.push({
+                field: 'input_reference',
+                filename: `last-${i}.png`,
+                mimetype: 'image/png',
+                buffer: fs.readFileSync(lastFrame),
+              });
+            } catch (err) {
+              console.warn(`⚠️ 第 ${i + 1} 段抽帧失败，退化为纯文本续写：${err.message}`);
+              usePrev = false;
+            }
+          } else if (o.files?.length) {
+            files.push(...o.files);
+          }
 
-      const { bytes } = await generateVideo({
-        prompt: p.prompt,
-        mode: p.mode,
-        width: o.width,
-        height: o.height,
-        aspectRatio: o.aspectRatio,
-        fps: o.fps,
-        steps: o.steps,
-        flowShift: o.flowShift,
-        seed: o.seed,
-        duration: p.duration,
-        audioFlowShift: o.audioFlowShift,
-        files,
-      });
+          ({ bytes } = await generateVideo({
+            prompt: p.prompt,
+            mode: usePrev ? 'fl2va' : 't2va',
+            width: o.width,
+            height: o.height,
+            aspectRatio: o.aspectRatio,
+            fps: o.fps,
+            steps: o.steps,
+            flowShift: o.flowShift,
+            seed: o.seed,
+            duration: p.duration,
+            audioFlowShift: o.audioFlowShift,
+            files,
+          }));
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          console.warn(`⚠️ 第 ${i + 1}/${plans.length} 段第 ${attempt} 次失败：${err.message}`);
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 3000));
+        }
+      }
+      if (lastErr) throw new Error(`第 ${i + 1}/${plans.length} 段生成失败：${lastErr.message}`);
 
       const segPath = path.join(workDir, `seg-${String(i + 1).padStart(2, '0')}.mp4`);
       fs.writeFileSync(segPath, bytes);

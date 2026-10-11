@@ -7,7 +7,8 @@ import { generateLongVideo } from './longvideo.js';
 
 fs.mkdirSync(config.outputsDir, { recursive: true });
 
-const MAX_ATTEMPTS = 2;
+// 逐段重试已在 longvideo.js 内部完成，外层不再整条重跑（避免重复消耗）
+const MAX_ATTEMPTS = 1;
 
 export function createJob(userId, { mode, prompt, params }) {
   const id = crypto.randomUUID();
