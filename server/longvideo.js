@@ -140,7 +140,9 @@ async function normalizeSegment(input, output, { withAudio }) {
     '-y', '-loglevel', 'error',
     '-i', input,
     '-vf', 'setpts=PTS-STARTPTS',
-    '-r', '24', '-fps_mode', 'cfr',
+    // 固定帧率：用 -vsync cfr（ffmpeg 4.x 与 5+/7.x 均兼容）；
+    // 不要用 -fps_mode（仅 ffmpeg 5+ 支持，旧版会 "Unrecognized option"）。
+    '-r', '24', '-vsync', 'cfr',
     '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
   ];
   if (withAudio) {
@@ -274,9 +276,16 @@ export async function generateLongVideo(o) {
             files.push(...o.files);
           }
 
+          // 模式选择（关键）：
+          //   第 1 段 -> 用用户所选模式（t2va/fl2va/ref2va），并带上其参考文件
+          //   后续段且成功抽帧 -> fl2va（以上段末帧为首帧）
+          //   后续段但抽帧失败 -> t2va（无任何参考文件）
+          // 早前版本把第 1 段硬编码为 t2va，导致 ref2va/fl2va 的参考文件
+          // 被发给 t2va 而报 “t2va does not accept image/video/audio conditions”。
+          const segMode = i === 0 ? p.mode : (usePrev ? 'fl2va' : 't2va');
           ({ bytes } = await generateVideo({
             prompt: p.prompt,
-            mode: usePrev ? 'fl2va' : 't2va',
+            mode: segMode,
             width: o.width,
             height: o.height,
             aspectRatio: o.aspectRatio,
