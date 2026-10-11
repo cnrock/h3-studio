@@ -16,6 +16,25 @@ const uploadsDir = path.join(config.dataDir, 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 
 const app = express();
+app.disable('x-powered-by');
+
+// ---- security headers ----
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'",
+  );
+  // 仅在 HTTPS 反代后面才发 HSTS，避免纯 HTTP 内网部署被锁死
+  if (process.env.ENABLE_HSTS === 'true') {
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  }
+  next();
+});
+
 app.use(express.json({ limit: '1mb' }));
 // tiny cookie parser (avoids an extra dependency)
 app.use((req, _res, next) => {
@@ -27,7 +46,45 @@ app.use((req, _res, next) => {
   next();
 });
 
-const COOKIE_OPTS = { httpOnly: true, sameSite: 'lax', secure: false, maxAge: 30 * 24 * 3600 * 1000 };
+const COOKIE_OPTS = {
+  httpOnly: true,
+  sameSite: 'lax',
+  // 反代 HTTPS 时（ENABLE_HSTS=true）自动启用 Secure
+  secure: process.env.ENABLE_HSTS === 'true',
+  maxAge: 30 * 24 * 3600 * 1000,
+};
+
+// ---- 极简内存限速（防暴力破解/刷注册） ----
+function makeLimiter({ windowMs, max, key }) {
+  const hits = new Map();
+  setInterval(() => {
+    const t = Date.now();
+    for (const [k, v] of hits) if (t - v.start > windowMs) hits.delete(k);
+  }, windowMs).unref?.();
+  return (req, res, next) => {
+    const k = key(req);
+    const t = Date.now();
+    let rec = hits.get(k);
+    if (!rec || t - rec.start > windowMs) {
+      rec = { start: t, n: 0 };
+      hits.set(k, rec);
+    }
+    rec.n++;
+    if (rec.n > max) {
+      const retry = Math.ceil((rec.start + windowMs - t) / 1000);
+      res.setHeader('Retry-After', String(Math.max(1, retry)));
+      return res.status(429).json({ error: `请求过于频繁，请 ${Math.max(1, retry)} 秒后再试` });
+    }
+    next();
+  };
+}
+
+const ipOf = (req) =>
+  (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+
+const loginLimiter = makeLimiter({ windowMs: 10 * 60 * 1000, max: 10, key: ipOf });
+const registerLimiter = makeLimiter({ windowMs: 60 * 60 * 1000, max: 5, key: ipOf });
+const forgotLimiter = makeLimiter({ windowMs: 60 * 60 * 1000, max: 5, key: ipOf });
 
 // ---------- uploads ----------
 const upload = multer({
@@ -49,7 +106,7 @@ function baseUrl(req) {
 }
 
 // ---------- auth routes ----------
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', registerLimiter, async (req, res) => {
   try {
     const { email, password } = req.body || {};
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: '邮箱格式不正确' });
@@ -91,7 +148,7 @@ app.get('/api/auth/verify', (req, res) => {
   res.send(page('激活成功', '你的账号已激活，可以关闭本页并使用网站了。'));
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body || {};
   const user = email && findUserByEmail(email);
   if (!user || !(await checkPassword(password || '', user.password_hash))) {
@@ -110,7 +167,7 @@ app.post('/api/auth/logout', (_req, res) => {
 
 app.get('/api/auth/me', authMiddleware, (req, res) => res.json({ user: publicUser(req.user) }));
 
-app.post('/api/auth/forgot', async (req, res) => {
+app.post('/api/auth/forgot', forgotLimiter, async (req, res) => {
   const { email } = req.body || {};
   const r = email ? setResetToken(email) : null;
   if (r) {
@@ -205,7 +262,13 @@ app.delete('/api/jobs/:id', authMiddleware, (req, res) => {
 });
 
 // ---------- meta ----------
-app.get('/api/health', async (_req, res) => {
+// 公开：只回一个 ok，不泄露任何后端地址/配置
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true });
+});
+
+// 详情：需登录，含 H3/SMTP 状态（供管理员排查）
+app.get('/api/health/detail', authMiddleware, async (_req, res) => {
   const [mail, h3] = await Promise.all([verifyMailer(), h3Health()]);
   res.json({
     ok: true,

@@ -219,3 +219,21 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 ## 免责声明
 
 本项目仅用于内部/学习用途。生成的视频由你自建的 H3 模型产出，请遵守相关许可与合规要求。
+
+---
+
+## 安全说明
+
+### 已内置的防护
+- `/api/health` 仅回 `{ok:true}`；后端地址等详情移入需登录的 `/api/health/detail`
+- 安全响应头：`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`、CSP，并关闭 `X-Powered-By`
+- 限速：同 IP 登录 10 次/10 分钟、注册 5 次/小时、找回密码 5 次/小时（超出 429）
+- 生成/任务/视频接口均需登录鉴权（401）
+
+### 部署必做
+1. **改 `JWT_SECRET`** 为随机长串（默认值可被伪造 token）
+2. **H3 后端不要暴露公网**：`203.0.113.10:8003` 应只允许本机/内网访问
+   （建议安全组/防火墙只放行 H3 Studio 所在主机，或仅监听内网）
+3. **上 HTTPS**：公网部署务必用 Nginx + Let's Encrypt，并设 `ENABLE_HSTS=true`
+   （同时会自动给 Cookie 加 `Secure`）
+4. 生产环境设置 `SKIP_EMAIL_VERIFICATION=false`，并保证 SMTP 可用
