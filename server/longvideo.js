@@ -122,11 +122,38 @@ function groupShots(shots, maxSeconds = H3_MAX_SECONDS) {
   return groups;
 }
 
+/**
+ * 固定帧率选项名随 ffmpeg 版本而异：
+ *   ffmpeg 4.x    -> 只有 -vsync（无 -fps_mode）
+ *   ffmpeg 5~7    -> 两者都有（-vsync 为弃用别名）
+ *   ffmpeg 8+/9.x -> -vsync 已移除，只有 -fps_mode
+ * 写死任一个都会在某些版本上报 “Unrecognized option”。启动时探测一次并缓存。
+ */
+let fpsFlagCache;
+async function fpsArgs() {
+  if (fpsFlagCache === undefined) {
+    try {
+      const { stdout } = await execFileP('ffmpeg', ['-hide_banner', '-h', 'full'], {
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      const help = String(stdout);
+      if (/\bfps_mode\b/.test(help)) fpsFlagCache = 'fps_mode';
+      else if (/\bvsync\b/.test(help)) fpsFlagCache = 'vsync';
+      else fpsFlagCache = '';
+    } catch {
+      fpsFlagCache = '';
+    }
+  }
+  return fpsFlagCache ? [`-${fpsFlagCache}`, 'cfr'] : [];
+}
+
 async function extractLastFrame(mp4Path, outPng) {
+  // -vsync 0 / -fps_mode passthrough 在不同 ffmpeg 版本下名称不同，抽单帧时
+  // 不传该选项即可（用 -frames:v 1 已足够精确取一帧）。
   await execFileP('ffmpeg', [
     '-y', '-loglevel', 'error',
     '-sseof', '-0.1', '-i', mp4Path,
-    '-vsync', '0', '-q:v', '2', '-frames:v', '1', outPng,
+    '-q:v', '2', '-frames:v', '1', outPng,
   ]);
   return outPng;
 }
@@ -137,13 +164,13 @@ async function extractLastFrame(mp4Path, outPng) {
  * 直接 `-c copy` 拼接会在段边界留下间隙，浏览器播放到边界即卡住。
  */
 async function normalizeSegment(input, output, { withAudio }) {
+  const fps = await fpsArgs();
   const args = [
     '-y', '-loglevel', 'error',
     '-i', input,
     '-vf', 'setpts=PTS-STARTPTS',
-    // 固定帧率：用 -vsync cfr（ffmpeg 4.x 与 5+/7.x 均兼容）；
-    // 不要用 -fps_mode（仅 ffmpeg 5+ 支持，旧版会 "Unrecognized option"）。
-    '-r', '24', '-vsync', 'cfr',
+    // 固定帧率：选项名随 ffmpeg 版本而异（fps_mode / vsync），已自动探测
+    '-r', '24', ...fps,
     '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
   ];
   if (withAudio) {
@@ -186,11 +213,12 @@ async function concatSegments(segmentPaths, outPath) {
   const listFile = path.join(workDir, `concat-${Date.now()}.txt`);
   fs.writeFileSync(listFile, normalized.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
   try {
+    const fps = await fpsArgs();
     await execFileP('ffmpeg', [
       '-y', '-loglevel', 'error',
       '-f', 'concat', '-safe', '0', '-i', listFile,
       '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
-      '-r', '24', '-vsync', 'cfr',
+      '-r', '24', ...fps,
       '-c:a', 'aac', '-b:a', '192k', '-ar', '32000', '-ac', '2',
       '-af', 'aresample=async=1:first_pts=0',
       '-movflags', '+faststart',

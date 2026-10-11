@@ -2,6 +2,10 @@
 
 H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到 `v2.0+`。
 
+## v1.4
+
+- 修复拼接报 "Unrecognized option 'vsync'"：运行时探测 fps_mode/vsync，兼容全部 ffmpeg 版本。
+
 ## v1.3
 
 - 时长上限可配置到 30 分钟；成片流式落盘，1G 内存也能拼接。
