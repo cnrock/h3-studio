@@ -1,6 +1,6 @@
 # 从官方静态 ffmpeg 镜像拷贝二进制，避免依赖 Debian apt 源
 # （bullseye 的 security 源常出现 404，导致 apt 安装 ffmpeg 失败）
-FROM mwader/static-ffmpeg:7.1 AS ffmpeg
+FROM mwader/static-ffmpeg:9.0.2-1 AS ffmpeg
 
 # 注意：使用 bullseye（glibc 2.31），避免旧版 Docker seccomp 拦截 clone3
 # 导致容器内 Node 启动即 core dump（Assertion failed: uv_thread_create）。
