@@ -204,11 +204,21 @@ function jobCard(j) {
   const el = document.createElement('div');
   el.className = 'job';
   const badge = { queued: '排队中', running: '生成中', done: '已完成', error: '失败' }[j.status] || j.status;
+  const queueText =
+    j.status === 'queued' && j.queuePosition
+      ? `第 ${j.queuePosition} 位（共 ${j.queueLength} 个排队）`
+      : '';
+  const prog = j.progress ? safeParse(j.progress) : null;
+  const progText =
+    j.status === 'running' && prog && prog.total > 1
+      ? `分段生成中：第 ${prog.current}/${prog.total} 段${prog.stage === 'concat' ? '（正在拼接）' : ''}`
+      : '';
+  const pending = queueText || progText || '';
   const media =
     j.status === 'done' && j.videoUrl
       ? `<video src="${j.videoUrl}" controls preload="metadata"></video>`
-      : `<div style="aspect-ratio:16/9;display:grid;place-items:center;background:#0f131b;color:var(--muted);font-size:13px">
-           ${j.status === 'error' ? '生成失败' : `<span class="spinner"></span>`}
+      : `<div style="aspect-ratio:16/9;display:grid;place-items:center;background:#0f131b;color:var(--muted);font-size:13px;text-align:center;padding:10px">
+           ${j.status === 'error' ? '生成失败' : `<div><span class="spinner"></span>${pending ? '<br>' + pending : ''}</div>`}
          </div>`;
   el.innerHTML = `
     ${media}
@@ -218,7 +228,7 @@ function jobCard(j) {
       <div class="muted">${j.mode} · ${j.params?.duration || '?'}s${j.bytes ? ' · ' + (j.bytes / 1048576).toFixed(1) + ' MB' : ''}</div>
       ${j.error ? `<div class="muted" style="color:#ff9db0">${escapeHtml(j.error)}</div>` : ''}
       <div class="actions" style="margin-top:auto">
-        ${j.videoUrl ? `<a href="${j.videoUrl}/download" download><button class="ghost">下载</button></a>` : ''}
+        ${j.videoUrl ? `<a href="${j.downloadUrl}" download><button class="ghost">下载</button></a>` : ''}
         <button class="danger" data-del="${j.id}">删除</button>
       </div>
     </div>`;
@@ -229,6 +239,8 @@ function jobCard(j) {
   };
   return el;
 }
+
+const safeParse = (s) => { try { return JSON.parse(s); } catch { return null; } };
 
 const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 

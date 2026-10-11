@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from './config.js';
 import { db, now } from './db.js';
-import { generateVideo } from './h3.js';
+import { generateLongVideo } from './longvideo.js';
 
 fs.mkdirSync(config.outputsDir, { recursive: true });
 
@@ -41,6 +41,7 @@ export function deleteJob(id, userId) {
 }
 
 function hydrate(row) {
+  const queued = row.status === 'queued';
   return {
     id: row.id,
     status: row.status,
@@ -49,9 +50,14 @@ function hydrate(row) {
     params: safeJson(row.params_json),
     error: row.error || null,
     bytes: row.output_bytes || null,
+    progress: row.progress || null,
+    // 排队位次：1 = 下一个执行
+    queuePosition: queued ? Math.max(1, queue.indexOf(row.id) + 1) : null,
+    queueLength: queue.length,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     videoUrl: row.output_file ? `/api/jobs/${row.id}/video` : null,
+    downloadUrl: row.output_file ? `/api/jobs/${row.id}/download` : null,
   };
 }
 
@@ -108,7 +114,7 @@ async function runJob(jobId) {
   let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const { bytes } = await generateVideo({
+      const { bytes, segments, seconds } = await generateLongVideo({
         prompt: row.prompt,
         mode: row.mode,
         width: params.width,
@@ -121,10 +127,15 @@ async function runJob(jobId) {
         duration: params.duration,
         audioFlowShift: params.audioFlowShift,
         files,
+        onProgress: (p) => setStatus(jobId, 'running', { progress: JSON.stringify(p) }),
       });
       const fileName = `${jobId}.mp4`;
       fs.writeFileSync(path.join(config.outputsDir, fileName), bytes);
-      setStatus(jobId, 'done', { output_file: fileName, output_bytes: bytes.length });
+      setStatus(jobId, 'done', {
+        output_file: fileName,
+        output_bytes: bytes.length,
+        progress: JSON.stringify({ stage: 'done', segments, seconds }),
+      });
       cleanupFiles(params);
       return;
     } catch (err) {

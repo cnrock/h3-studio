@@ -14,3 +14,7 @@ services:
     extra_hosts:
       # 让容器内可用 host.docker.internal 访问宿主机上的 H3 服务
       - "host.docker.internal:host-gateway"
+    # 若宿主机 Docker < 20.10.10（如 20.10.7）且未升级，容器内 Node 会因
+    # seccomp 拦 clone3 而崩溃，取消下面注释以绕开：
+    # security_opt:
+    #   - seccomp:unconfined

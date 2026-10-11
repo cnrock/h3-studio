@@ -40,4 +40,8 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id, created_at DESC);
 `);
 
+// --- lightweight migrations (add columns if missing) ---
+const jobCols = db.prepare('PRAGMA table_info(jobs)').all().map((c) => c.name);
+if (!jobCols.includes('progress')) db.exec('ALTER TABLE jobs ADD COLUMN progress TEXT');
+
 export const now = () => Date.now();
