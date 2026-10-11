@@ -205,8 +205,16 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
     if (prompt.length > config.limits.promptChars) return res.status(400).json({ error: `提示词过长（上限 ${config.limits.promptChars} 字符）` });
 
     const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
-    const files = (req.files || []).map((f) => ({
-      field: mode === 'fl2va' ? 'input_reference' : 'input_reference',
+
+    // H3 的 multipart 参考字段名有严格区分（见 vLLM-Omni helpers.py / 官方测试）：
+    //   - ref2va（参考素材，可图可视频混合）→ 复数 input_references
+    //   - fl2va 单帧 → 单数 input_reference
+    // 用错字段名会导致：单数字段下多文件只剩最后一个，且视频被解码成帧序列后
+    // 被当成「多个视频参考」而报 “ref2va accepts at most 3 video references”。
+    const uploads = req.files || [];
+    const refField = mode === 'ref2va' || uploads.length > 1 ? 'input_references' : 'input_reference';
+    const files = uploads.map((f) => ({
+      field: refField,
       filename: f.originalname,
       path: f.path,
       mimetype: f.mimetype,

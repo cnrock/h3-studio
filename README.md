@@ -292,3 +292,22 @@ args:
 
 v7 已**移除 undici 依赖**，改用 Node 内置 `http/https` 自行构造 multipart，
 超时仍完全可控，且无额外依赖。
+
+---
+
+## 错误排查：ref2va 报 "accepts at most 3 video references"
+
+**根因**：H3 的 multipart 参考字段名分单复数两种，用错会导致参考数量统计错乱。
+
+| 场景 | 正确字段名 |
+|---|---|
+| ref2va（参考素材，图/视频混合，可多个） | **`input_references`**（复数） |
+| fl2va 单帧 | `input_reference`（单数） |
+| fl2va 首+末两帧 | `input_references`（复数） |
+
+若把多文件都塞进单数 `input_reference`：FastAPI 只保留最后一个文件，且视频会被
+解码成帧序列，被 H3 当成「多个视频参考」→ 报
+`ref2va accepts at most 3 video references`。
+
+网站已按上表自动选择字段名（`server/index.js`）。参考上限（H3 侧）：
+图片 ≤9、视频 ≤3、独立音频 ≤3、总数 ≤12；参考视频总时长 ≤15 秒。
