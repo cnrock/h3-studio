@@ -1,6 +1,6 @@
 {
   "name": "h3-studio",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "MiniMax H3 视频生成站：邮箱注册/激活/登录，文生视频 + 首尾帧 + 参考素材（图/视频），调用自建 H3 接口。",
