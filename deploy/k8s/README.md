@@ -36,9 +36,10 @@ kubectl -n h3-studio port-forward svc/h3-studio 8787:8787
 ## 3. 镜像
 
 ```
-cnrock/h3-studio:<版本>
+cnrock/h3-studio:<版本>          # 当前清单默认 1.6.2
 ```
-- 官方发布；**amd64**（与 x86 集群一致）。ARM 集群需要求另出 arm64 标签。
+- 官方发布；**多架构**（linux/amd64 + linux/arm64），x86 / ARM 集群均可直接拉取。
+- `latest` 指向最新版本。
 - 升级：改 `kustomization.yaml` 的 `newTag`（或 Deployment 的 image tag）后 `kubectl apply -k deploy/k8s/`。
 
 ## 4. 重要约束
