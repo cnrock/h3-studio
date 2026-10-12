@@ -295,6 +295,7 @@ app.get('/api/config', (_req, res) => {
       maxVideoMB: config.limits.maxVideoMB,
       maxFiles: config.limits.maxFiles,
       maxDurationSec: config.limits.maxDurationSec,
+      maxRefVideoSec: config.limits.maxRefVideoSec,
     },
   });
 });

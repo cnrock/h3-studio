@@ -153,6 +153,87 @@ async function fpsArgs() {
   return fpsFlagCache ? [`-${fpsFlagCache}`, 'cfr'] : [];
 }
 
+/**
+ * H3 对 ref2va 参考视频有硬校验：每个参考视频时长必须 ∈ [2,15] 秒，且所有参考视频
+ * 总时长 ≤15 秒；超出会被直接拒绝（500，例如
+ * "reference video 0 duration must be in [2, 15] seconds, got 157.500"）。
+ * 提交前把用户上传的参考视频规整到合规范围：
+ *   - 超长：从头截取到允许上限（-c copy 不重编码，秒级完成）
+ *   - 过短（<2s）：明确报错，提示改用更长的片段
+ * 每个视频的可用上限按剩余总时长预算动态收敛，保证合计 ≤ 上限。
+ */
+async function probeDurationSec(input) {
+  try {
+    const { stdout } = await execFileP('ffprobe', [
+      '-v', 'error', '-show_entries', 'format=duration',
+      '-of', 'default=nw=1:nk=1', input,
+    ]);
+    const d = Number(String(stdout).trim());
+    return Number.isFinite(d) ? d : null;
+  } catch {
+    return null; // 探测失败：不阻断，交由 H3 给出明确报错
+  }
+}
+
+/** 把内存中的文件落到临时文件，供 ffprobe/ffmpeg 处理（调用方负责清理） */
+function bufferToTempFile(f) {
+  const ext = path.extname(f.filename || '') || (/quicktime/.test(f.mimetype || '') ? '.mov' : '.mp4');
+  const tmp = path.join(os.tmpdir(), `h3-ref-${crypto.randomUUID()}${ext}`);
+  fs.writeFileSync(tmp, f.buffer);
+  return tmp;
+}
+
+export async function normalizeReferenceVideos(files) {
+  const cap = Math.max(2, config.limits.maxRefVideoSec || 15);
+  const temps = [];
+  const out = [];
+  let budget = cap; // 参考视频合计可用时长
+  try {
+    for (const f of files || []) {
+      const isVideo = /^video\//.test(f.mimetype || '') || /\.(mp4|mov)$/i.test(f.filename || '');
+      if (!isVideo) { out.push(f); continue; }
+
+      const src = bufferToTempFile(f);
+      temps.push(src);
+      const dur = await probeDurationSec(src);
+      if (!dur) { out.push(f); continue; } // 探测不到时长：原样转发
+      const allowed = Math.min(cap, budget);
+
+      if (dur < 2) {
+        throw new Error(`参考视频「${f.filename}」时长仅 ${dur.toFixed(1)} 秒，低于 H3 允许的最小值 2 秒，请换用更长的片段。`);
+      }
+      if (dur <= allowed + 0.05) { budget -= dur; out.push(f); continue; }
+      if (allowed < 2) {
+        throw new Error(`参考视频合计时长超出 H3 上限 ${cap} 秒（剩余 ${Math.max(0, budget).toFixed(1)} 秒），请减少参考视频数量或时长。`);
+      }
+
+      // 必须【重编码】：`-c copy` 按关键帧切，实际会切到 15.2s 之类，仍 >上限
+      // 会被 H3 拒收。重编码后时长精确可控（参考片段很短，开销可接受）。
+      // 再留 0.1s 余量，避开 H3 对「恰好 15.0」的浮点边界挑剔。
+      const target = Math.max(2, allowed - 0.1);
+      const trimmed = path.join(os.tmpdir(), `h3-trim-${crypto.randomUUID()}.mp4`);
+      temps.push(trimmed);
+      await execFileP('ffmpeg', [
+        '-y', '-loglevel', 'error',
+        '-i', src,
+        '-t', String(target),
+        '-vf', 'setpts=PTS-STARTPTS',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart',
+        trimmed,
+      ]);
+      const outDur = (await probeDurationSec(trimmed)) || allowed;
+      budget -= Math.min(allowed, outDur);
+      out.push({ ...f, buffer: fs.readFileSync(trimmed), filename: `trim-${path.basename(f.filename || 'ref.mp4')}`, mimetype: 'video/mp4' });
+      console.warn(`⚠️ 参考视频「${f.filename}」${dur.toFixed(1)}s 超出上限，已自动截取为 ${outDur.toFixed(1)}s`);
+    }
+    return out;
+  } finally {
+    for (const t of temps) { try { fs.unlinkSync(t); } catch {} }
+  }
+}
+
 async function extractLastFrame(mp4Path, outPng) {
   // -vsync 0 / -fps_mode passthrough 在不同 ffmpeg 版本下名称不同，抽单帧时
   // 不传该选项即可（用 -frames:v 1 已足够精确取一帧）。
@@ -246,6 +327,8 @@ async function concatSegments(segmentPaths, outPath) {
  */
 export async function generateLongVideo(o) {
   const onProgress = o.onProgress || (() => {});
+  // 参考视频先规整到 H3 允许范围（每段 2–15s、合计 ≤15s），否则 H3 会 500
+  o = { ...o, files: await normalizeReferenceVideos(o.files || []) };
   const storyboard = parseStoryboard(o.prompt);
 
   let plans; // [{ prompt, mode, duration, usePrevFrame }]

@@ -8,7 +8,7 @@ const MODE_HINTS = {
   ref2va: '上传参考图片 / 视频片段（可混合，最多 9 个），模型会参考其主体、风格、动作。',
 };
 
-const state = { user: null, mode: 't2va', files: [], poll: null, limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9 } };
+const state = { user: null, mode: 't2va', files: [], poll: null, limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15 } };
 
 function banner(el, msg, type = 'err') {
   el.textContent = msg;
@@ -104,7 +104,7 @@ $$('[data-mode]').forEach((btn) => {
     $('#modeHint').textContent = MODE_HINTS[state.mode];
     const multi = state.mode === 'ref2va';
     $('#fileInput').multiple = multi;
-    $('#fileLabel').textContent = state.mode === 't2va' ? '参考文件（本模式无需上传）' : (multi ? '参考文件（图片/视频，可多选）' : '首帧 / 末帧图片（1–2 张）');
+    $('#fileLabel').textContent = state.mode === 't2va' ? '参考文件（本模式无需上传）' : (multi ? `参考文件（图片/视频，可多选；单个视频 ≤${state.limits.maxRefVideoSec} 秒）` : '首帧 / 末帧图片（1–2 张）');
     $('#dropZoneWrap').style.opacity = state.mode === 't2va' ? '.5' : '1';
     $('#fileInput').accept = state.mode === 'ref2va' ? 'image/*,video/*' : 'image/*';
     state.files = [];
@@ -156,6 +156,18 @@ $('#generateBtn').onclick = async () => {
   if (!prompt) return banner($('#genBanner'), '请输入提示词');
   if (state.mode !== 't2va' && state.files.length === 0) {
     return banner($('#genBanner'), state.mode === 'fl2va' ? '请至少上传 1 张图片' : '请至少上传 1 个参考文件');
+  }
+
+  // 参考视频时长预检：H3 硬要求每个参考视频 ∈ [2,15] 秒。
+  if (state.mode === 'ref2va') {
+    const vids = state.files.filter((f) => f.type.startsWith('video'));
+    const durs = await Promise.all(vids.map(videoDuration));
+    const tooShort = vids.find((f, i) => durs[i] && durs[i] < 2);
+    if (tooShort) return banner($('#genBanner'), `参考视频「${tooShort.name}」不足 2 秒，H3 要求每个参考视频至少 2 秒，请换用更长的片段。`);
+    const tooLong = vids.filter((f, i) => durs[i] && durs[i] > state.limits.maxRefVideoSec);
+    if (tooLong.length) {
+      banner($('#genBanner'), `参考视频超过 ${state.limits.maxRefVideoSec} 秒，已自动截取前 ${state.limits.maxRefVideoSec} 秒参与生成：${tooLong.map((f) => f.name).join('、')}`, 'ok');
+    }
   }
 
   const [w, h] = $('#resolution').value.split('x').map(Number);
@@ -259,6 +271,18 @@ function jobCard(j) {
 
 const safeParse = (s) => { try { return JSON.parse(s); } catch { return null; } };
 
+/** 读取本地视频文件的时长（秒）；失败返回 null（不阻断提交） */
+function videoDuration(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.onloadedmetadata = () => { resolve(Number.isFinite(v.duration) ? v.duration : null); URL.revokeObjectURL(url); };
+    v.onerror = () => { resolve(null); URL.revokeObjectURL(url); };
+    v.src = url;
+  });
+}
+
 const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // ---------- boot ----------
@@ -271,11 +295,12 @@ const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&a
     $('#authView').classList.remove('hidden');
   }
   $('#modeHint').textContent = MODE_HINTS.t2va;
-  $('#fileHint').textContent = `图片 ≤${state.limits.maxImageMB}MB，视频 ≤${state.limits.maxVideoMB}MB`;
+  const hint = () => { $('#fileHint').textContent = `图片 ≤${state.limits.maxImageMB}MB，视频 ≤${state.limits.maxVideoMB}MB（参考视频单个 ≤${state.limits.maxRefVideoSec} 秒，超长自动截取）`; };
+  hint();
   try {
     const cfg = await api('/api/config');
     if (cfg && cfg.limits) state.limits = { ...state.limits, ...cfg.limits };
   } catch { /* 保留默认值 */ }
   updatePromptCount($('#prompt').value.length);
-  $('#fileHint').textContent = `图片 ≤${state.limits.maxImageMB}MB，视频 ≤${state.limits.maxVideoMB}MB`;
+  hint();
 })();

@@ -60,6 +60,9 @@ export const config = {
     maxVideoMB: int(process.env.MAX_VIDEO_MB, 50),
     maxFiles: int(process.env.MAX_FILES, 9),
     promptChars: int(process.env.PROMPT_CHARS, 20000),
+    // H3 硬校验：ref2va 的【每个】参考视频时长必须 ∈ [2,15] 秒，且参考视频总时长 ≤15 秒。
+    // 用户上传的整段长视频会被 H3 直接拒绝（500），这里用同值做前端限制与自动截取。
+    maxRefVideoSec: int(process.env.MAX_REF_VIDEO_SEC, 15),
     // 单次任务允许的总时长（秒）。H3 单段上限 15 秒，超出部分自动分段续写。
     // 默认 1800（30 分钟）；调大需同步关注磁盘与生成耗时。
     maxDurationSec: int(process.env.MAX_DURATION_SEC, 1800),
