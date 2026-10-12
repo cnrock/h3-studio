@@ -37,7 +37,7 @@ spec:
         - operator: Exists
       containers:
         - name: h3-studio
-          image: cnrock/h3-studio:1.6.2
+          image: cnrock/h3-studio:1.6.3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

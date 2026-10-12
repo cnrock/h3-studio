@@ -248,11 +248,25 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 
 ## 安全说明
 
+> 用后即弃会话：令牌存 `HttpOnly` cookie（非 `localStorage`），退出登录即时清 Cookie；
+> 密码用 bcrypt 哈希存储，重置令牌 1 小时过期且一次性。
+
 ### 已内置的防护
 - `/api/health` 仅回 `{ok:true}`；后端地址等详情移入需登录的 `/api/health/detail`
 - 安全响应头：`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`、CSP，并关闭 `X-Powered-By`
 - 限速：同 IP 登录 10 次/10 分钟、注册 5 次/小时、找回密码 5 次/小时（超出 429）
 - 生成/任务/视频接口均需登录鉴权（401）
+
+### 凭据不进 URL（v1.6.3）
+
+登录/注册/找回密码表单均显式声明 `method="post"` 并由 JS 以 `fetch` POST 提交，
+凭据只走请求体。服务端另加一道兜底：任何带 `password`/`email` 等字段的 **GET** 请求
+一律 `303` 重定向到干净路径，把凭据从浏览器历史 / Referer / 反代与服务器访问日志中剔除
+（`/api/` 下的 JSON 接口与 `reset`/`verify` 的合法 token query 不受影响）。
+HTML 页面向应 `Cache-Control: no-store`，避免旧版页面（旧版表单会原生 GET 提交）被复用。
+
+> 若你在反代（Nginx）开启了访问日志，且历史上有过这类带凭据的 GET 请求，
+> 建议清理对应日志段；并确认 `Referrer-Policy: no-referrer` 生效（已内置）。
 
 ### 部署必做
 1. **改 `JWT_SECRET`** 为随机长串（默认值可被伪造 token）

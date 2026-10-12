@@ -36,6 +36,21 @@ app.use((_req, res, next) => {
 });
 
 app.use(express.json({ limit: '1mb' }));
+
+// 安全兜底：绝不允许凭据出现在 URL（会进浏览器历史 / Referer / 反代与服务器访问日志）。
+// 前端登录表单已改为 JS POST 提交（并显式 method=post），但若有旧页面缓存 / JS 被拦截 /
+// 脚本报错导致浏览器原生 GET 提交，这里会立刻 303 到干净路径，把凭据从 URL 与历史中剔除。
+// 注意：/api/auth/reset 与 /api/auth/verify 合法地使用 query（token 非密码），因此排除。
+const CRED_KEYS = ['password', 'passwd', 'pass', 'pwd', 'credential', 'email'];
+app.use((req, res, next) => {
+  if (req.method === 'GET' && req.query && !req.path.startsWith('/api/')) {
+    const leaked = CRED_KEYS.some((k) => typeof req.query[k] === 'string' && req.query[k] !== '');
+    if (leaked) {
+      return res.redirect(303, req.path); // 丢弃全部 query，不经处理器
+    }
+  }
+  next();
+});
 // tiny cookie parser (avoids an extra dependency)
 app.use((req, _res, next) => {
   req.cookies = {};
@@ -324,7 +339,12 @@ app.get('/api/health/detail', authMiddleware, async (_req, res) => {
   });
 });
 
-app.use(express.static(path.join(config.root, 'public')));
+app.use(express.static(path.join(config.root, 'public'), {
+  // HTML 不缓存：避免浏览器用旧版页面（旧版表单会原生 GET 提交，把密码带进 URL）
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
+  },
+}));
 
 app.use((err, _req, res, _next) => {
   res.status(400).json({ error: err.message || '请求失败' });

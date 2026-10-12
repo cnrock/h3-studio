@@ -32,26 +32,26 @@
       </div>
       <div id="authBanner" class="banner"></div>
 
-      <form id="loginForm">
+      <form id="loginForm" method="post" action="/api/auth/login">
         <label>邮箱</label>
-        <input type="email" name="email" required placeholder="you@example.com" />
+        <input type="email" name="email" autocomplete="username" required placeholder="you@example.com" />
         <label>密码</label>
-        <input type="password" name="password" required placeholder="至少 6 位" />
+        <input type="password" name="password" autocomplete="current-password" required placeholder="至少 6 位" />
         <div class="actions"><button type="submit">登录</button></div>
       </form>
 
-      <form id="registerForm" class="hidden">
+      <form id="registerForm" class="hidden" method="post" action="/api/auth/register">
         <label>邮箱</label>
-        <input type="email" name="email" required placeholder="you@example.com" />
+        <input type="email" name="email" autocomplete="username" required placeholder="you@example.com" />
         <label>密码</label>
-        <input type="password" name="password" required minlength="6" placeholder="至少 6 位" />
+        <input type="password" name="password" autocomplete="new-password" required minlength="6" placeholder="至少 6 位" />
         <div class="actions"><button type="submit">注册</button></div>
         <p class="muted" style="margin-top:12px">注册后需到邮箱点击激活链接才能登录。</p>
       </form>
 
-      <form id="forgotForm" class="hidden">
+      <form id="forgotForm" class="hidden" method="post" action="/api/auth/forgot">
         <label>注册邮箱</label>
-        <input type="email" name="email" required placeholder="you@example.com" />
+        <input type="email" name="email" autocomplete="username" required placeholder="you@example.com" />
         <div class="actions"><button type="submit">发送重置邮件</button></div>
       </form>
     </div>

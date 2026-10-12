@@ -13,11 +13,11 @@
   <header class="top"><div class="brand"><span class="dot"></span>H3 Studio <small>重置密码</small></div></header>
   <div class="card" style="max-width:420px;margin:32px auto">
     <div id="banner" class="banner"></div>
-    <form id="resetForm">
+    <form id="resetForm" method="post" action="/api/auth/reset">
       <label>新密码</label>
-      <input type="password" id="password" required minlength="6" placeholder="至少 6 位" />
+      <input type="password" id="password" autocomplete="new-password" required minlength="6" placeholder="至少 6 位" />
       <label>确认新密码</label>
-      <input type="password" id="password2" required minlength="6" placeholder="再次输入" />
+      <input type="password" id="password2" autocomplete="new-password" required minlength="6" placeholder="再次输入" />
       <div class="actions"><button type="submit">重置密码</button></div>
     </form>
     <p class="muted" style="margin-top:16px"><a href="/">返回首页</a></p>
