@@ -44,7 +44,7 @@ data:
   MAX_IMAGE_MB: "30"
   MAX_VIDEO_MB: "50"
   MAX_FILES: "9"
-  PROMPT_CHARS: "7000"
+  PROMPT_CHARS: "20000"
   MAX_DURATION_SEC: "1800"
 
   # ---- 持久化路径（与 PVC 挂载一致）----
