@@ -18,7 +18,7 @@
   | `t2va` 文生视频 | 纯文字生成（含原生音频） | 无 |
   | `fl2va` 首尾帧 | 1 张（首帧）或 2 张（首帧+末帧） | `input_reference` 图片 |
   | `ref2va` 参考素材 | 参考图片 / 视频片段（可混合） | `input_reference` 图片/视频 |
-- **突破 15 秒**：时长可填 4–120 秒，超过 15 秒时后端自动分段续写并拼接（见下文）
+- **突破 15 秒**：时长可填 4–1800 秒（上限由 `MAX_DURATION_SEC` 控制，默认 30 分钟），超过 15 秒时后端自动分段续写并拼接（见下文）
 - **排队提示**：多用户时任务串行排队，界面显示「第 N 位（共 M 个排队）」与分段进度
 - **作品列表**：排队 / 生成中 / 完成 / 失败 状态实时刷新，可在线播放、下载、删除
 - 时长、画幅、768p/2K、采样步数、flow_shift、seed 等参数可调
@@ -122,7 +122,7 @@ docker compose logs -f
 ## 版本四：Kubernetes 部署
 
 一套完整清单，`kubectl apply -k deploy/k8s/` 部署。含 Namespace / ConfigMap / Secret /
-PVC / Deployment / Service / Ingress，镜像用官方发布的 `cnrock/h3-studio`（多架构 amd64+arm64，标签 `1.5.0`）。
+PVC / Deployment / Service / Ingress，镜像用官方发布的 `cnrock/h3-studio`（多架构 amd64+arm64，标签 `1.6.0`）。
 
 ```bash
 # 先改三处：01-configmap.yaml（域名/H3 地址/SMTP）、02-secret.yaml（密钥）、06-ingress.yaml（域名）
@@ -233,7 +233,7 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 
 ---
 
-## 界面（v1.5 · Apple 风格）
+## 界面（v1.6 · Apple 风格）
 
 参考 Apple 设计语言重构：浅色为主 / 深色为精致对偶、毛玻璃顶栏、胶囊按钮、大留白、
 精确字距与柔和多层阴影；登录页与应用页（生成表单、作品网格）统一。配色自动跟随系统深浅色。

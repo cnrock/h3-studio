@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { generateVideo } from './h3.js';
+import { config } from './config.js';
 
 const execFileP = promisify(execFile);
 
@@ -31,10 +32,15 @@ export function parseStoryboard(prompt) {
   const timeRe = /(\d{1,2}):(\d{2})\s*[–\-—~至到]\s*(\d{1,2}):(\d{2})/;
   const shotRe = /(?:分镜|镜头|shot)\s*[0-9一二三四五六七八九十]+/i;
 
-  // 找到所有"镜头块"的起始行
+  // 镜头块起始行的识别：
+  //   1) 「镜头 N｜0:00–0:15」——含镜头标记 + 时间轴（原始格式）
+  //   2) 仅有时间轴「0:00–0:15」——放宽支持（很多剧本只写时间轴）
+  // 放宽后仍要求 ≥2 个镜头，避免把正文里偶然出现的时间当成分镜。
   const starts = [];
   for (let i = 0; i < lines.length; i++) {
-    if (shotRe.test(lines[i]) && timeRe.test(lines[i])) starts.push(i);
+    const hasTime = timeRe.test(lines[i]);
+    const hasShot = shotRe.test(lines[i]);
+    if (hasTime && (hasShot || /^\s*[（(]?\d{1,2}:\d{2}/.test(lines[i]))) starts.push(i);
   }
   if (starts.length < 2) return null; // 少于 2 个镜头，不必按分镜拆
 
@@ -71,8 +77,8 @@ export function parseStoryboard(prompt) {
 }
 
 /** 不按分镜时的普通分段：每段 ∈ [4,15]，均匀分配且不丢时长 */
-export function planSegments(totalSeconds) {
-  const total = Math.max(4, Math.min(Number(totalSeconds) || 0, 120));
+export function planSegments(totalSeconds, maxTotal = config.limits.maxDurationSec) {
+  const total = Math.max(4, Math.min(Number(totalSeconds) || 0, maxTotal));
   const n = Math.max(1, Math.ceil(total / H3_MAX_SECONDS));
   const base = Math.floor(total / n);
   let remainder = total - base * n;
@@ -244,7 +250,17 @@ export async function generateLongVideo(o) {
 
   let plans; // [{ prompt, mode, duration, usePrevFrame }]
   if (storyboard) {
-    const groups = groupShots(storyboard.shots);
+    // 分镜路径同样受总时长上限约束，避免超长剧本绕过限制
+    let groups = groupShots(storyboard.shots);
+    const cap = config.limits.maxDurationSec;
+    let acc = 0;
+    const capped = [];
+    for (const g of groups) {
+      if (acc + g.dur > cap && capped.length) break;
+      capped.push(g);
+      acc += g.dur;
+    }
+    groups = capped;
     const total = groups.length;
     plans = groups.map((g, i) => {
       const dur = Math.min(H3_MAX_SECONDS, Math.max(4, Math.round(g.dur)));
