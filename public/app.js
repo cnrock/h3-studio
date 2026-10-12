@@ -8,7 +8,7 @@ const MODE_HINTS = {
   ref2va: '上传参考图片 / 视频片段（可混合，最多 9 个），模型会参考其主体、风格、动作。',
 };
 
-const state = { user: null, mode: 't2va', files: [], poll: null };
+const state = { user: null, mode: 't2va', files: [], poll: null, limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9 } };
 
 function banner(el, msg, type = 'err') {
   el.textContent = msg;
@@ -144,9 +144,10 @@ function renderThumbs() {
   box.querySelectorAll('.x').forEach((b) => (b.onclick = () => { state.files.splice(+b.dataset.i, 1); renderThumbs(); }));
 }
 
-$('#prompt').addEventListener('input', (e) => {
-  $('#promptCount').textContent = `${e.target.value.length} / 7000`;
-});
+const updatePromptCount = (len) => {
+  $('#promptCount').textContent = `${len} / ${state.limits.promptChars}`;
+};
+$('#prompt').addEventListener('input', (e) => updatePromptCount(e.target.value.length));
 
 // ---------- generate ----------
 $('#generateBtn').onclick = async () => {
@@ -270,5 +271,11 @@ const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&a
     $('#authView').classList.remove('hidden');
   }
   $('#modeHint').textContent = MODE_HINTS.t2va;
-  $('#fileHint').textContent = '图片 ≤30MB，视频 ≤50MB';
+  $('#fileHint').textContent = `图片 ≤${state.limits.maxImageMB}MB，视频 ≤${state.limits.maxVideoMB}MB`;
+  try {
+    const cfg = await api('/api/config');
+    if (cfg && cfg.limits) state.limits = { ...state.limits, ...cfg.limits };
+  } catch { /* 保留默认值 */ }
+  updatePromptCount($('#prompt').value.length);
+  $('#fileHint').textContent = `图片 ≤${state.limits.maxImageMB}MB，视频 ≤${state.limits.maxVideoMB}MB`;
 })();

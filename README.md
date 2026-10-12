@@ -5,7 +5,7 @@
 
 - 参考站点交互：<https://pixo.video/zh/blog/minimax-h3-prompts>（提示词写法与场景）
 - 模型接口：vLLM-Omni 的 OpenAI 兼容视频 API（`/v1/videos/sync`）
-- 纯 Node.js + 内置 SQLite，**无需任何原生依赖**，四种部署形态开箱即用
+- 纯 Node.js + 内置 SQLite，**无需任何原生依赖**，三种部署形态开箱即用
 
 ---
 
@@ -18,7 +18,7 @@
   | `t2va` 文生视频 | 纯文字生成（含原生音频） | 无 |
   | `fl2va` 首尾帧 | 1 张（首帧）或 2 张（首帧+末帧） | `input_reference` 图片 |
   | `ref2va` 参考素材 | 参考图片 / 视频片段（可混合） | `input_reference` 图片/视频 |
-- **突破 15 秒**：时长可填 4–1800 秒（上限由 `MAX_DURATION_SEC` 控制，默认 30 分钟），超过 15 秒时后端自动分段续写并拼接（见下文）
+- **突破 15 秒**：时长可填 4–120 秒，超过 15 秒时后端自动分段续写并拼接（见下文）
 - **排队提示**：多用户时任务串行排队，界面显示「第 N 位（共 M 个排队）」与分段进度
 - **作品列表**：排队 / 生成中 / 完成 / 失败 状态实时刷新，可在线播放、下载、删除
 - 时长、画幅、768p/2K、采样步数、flow_shift、seed 等参数可调
@@ -109,7 +109,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now h3-studio
 
 ```bash
 cp env.docker.example .env
-# 若 H3 跑在宿主机：H3_BASE_URL=http://host.docker.internal:8003
+# 若 H3 跑在宿主机：H3_BASE_URL=http://host.docker.internal:32206
 docker compose up -d --build
 docker compose logs -f
 # 浏览器打开 http://<宿主机IP>:8787
@@ -122,7 +122,7 @@ docker compose logs -f
 ## 版本四：Kubernetes 部署
 
 一套完整清单，`kubectl apply -k deploy/k8s/` 部署。含 Namespace / ConfigMap / Secret /
-PVC / Deployment / Service / Ingress，镜像用官方发布的 `cnrock/h3-studio`（多架构 amd64+arm64，标签 `1.6.0`）。
+PVC / Deployment / Service / Ingress，镜像用官方发布的 `cnrock/h3-studio`。
 
 ```bash
 # 先改三处：01-configmap.yaml（域名/H3 地址/SMTP）、02-secret.yaml（密钥）、06-ingress.yaml（域名）
@@ -162,7 +162,7 @@ sudo nginx -t && sudo systemctl reload nginx
 
 | 字段 | 说明 |
 |---|---|
-| `prompt` | 提示词（≤7000 字符） |
+| `prompt` | 提示词（≤20000 字符，可用 PROMPT_CHARS 调整） |
 | `width` / `height` | 输出尺寸 |
 | `aspect_ratio` | `21:9/16:9/4:3/1:1/3:4/9:16` |
 | `fps` | 帧率（H3 固定 24） |
@@ -202,7 +202,7 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 | `JWT_SECRET` | 开发串 | **生产必改** |
 | `SKIP_EMAIL_VERIFICATION` | `false` | `true` 则注册即可用 |
 | `SMTP_*` | — | 见模板；含 `SMTP_TLS_REJECT_UNAUTHORIZED` |
-| `MAX_IMAGE_MB` / `MAX_VIDEO_MB` / `MAX_FILES` / `PROMPT_CHARS` | 30/50/9/7000 | 上传与提示词限制 |
+| `MAX_IMAGE_MB` / `MAX_VIDEO_MB` / `MAX_FILES` / `PROMPT_CHARS` | 30/50/9/20000 | 上传与提示词限制 |
 
 ---
 
@@ -238,7 +238,7 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 参考 Apple 设计语言重构：浅色为主 / 深色为精致对偶、毛玻璃顶栏、胶囊按钮、大留白、
 精确字距与柔和多层阴影；登录页与应用页（生成表单、作品网格）统一。配色自动跟随系统深浅色。
 
-![应用界面](docs/screenshots/v1.0-app.png)
+![应用界面](docs/screenshots/v1.6-app.png)
 
 ## 免责声明
 
@@ -256,7 +256,7 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 
 ### 部署必做
 1. **改 `JWT_SECRET`** 为随机长串（默认值可被伪造 token）
-2. **H3 后端不要暴露公网**：`203.0.113.10:8003` 应只允许本机/内网访问
+2. **H3 后端不要暴露公网**：`210.140.215.4:32206` 应只允许本机/内网访问
    （建议安全组/防火墙只放行 H3 Studio 所在主机，或仅监听内网）
 3. **上 HTTPS**：公网部署务必用 Nginx + Let's Encrypt，并设 `ENABLE_HSTS=true`
    （同时会自动给 Cookie 加 `Secure`）

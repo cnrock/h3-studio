@@ -59,7 +59,7 @@ export const config = {
     maxImageMB: int(process.env.MAX_IMAGE_MB, 30),
     maxVideoMB: int(process.env.MAX_VIDEO_MB, 50),
     maxFiles: int(process.env.MAX_FILES, 9),
-    promptChars: int(process.env.PROMPT_CHARS, 7000),
+    promptChars: int(process.env.PROMPT_CHARS, 20000),
     // 单次任务允许的总时长（秒）。H3 单段上限 15 秒，超出部分自动分段续写。
     // 默认 1800（30 分钟）；调大需同步关注磁盘与生成耗时。
     maxDurationSec: int(process.env.MAX_DURATION_SEC, 1800),

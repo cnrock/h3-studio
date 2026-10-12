@@ -286,6 +286,19 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+// 公开：前端渲染所需的非敏感限制值（提示词/文件大小等）
+app.get('/api/config', (_req, res) => {
+  res.json({
+    limits: {
+      promptChars: config.limits.promptChars,
+      maxImageMB: config.limits.maxImageMB,
+      maxVideoMB: config.limits.maxVideoMB,
+      maxFiles: config.limits.maxFiles,
+      maxDurationSec: config.limits.maxDurationSec,
+    },
+  });
+});
+
 // 详情：需登录，含 H3/SMTP 状态（供管理员排查）
 app.get('/api/health/detail', authMiddleware, async (_req, res) => {
   const targets = [
