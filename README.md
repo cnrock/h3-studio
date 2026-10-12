@@ -18,7 +18,7 @@
   | `t2va` 文生视频 | 纯文字生成（含原生音频） | 无 |
   | `fl2va` 首尾帧 | 1 张（首帧）或 2 张（首帧+末帧） | `input_reference` 图片 |
   | `ref2va` 参考素材 | 参考图片 / 视频片段（可混合） | `input_reference` 图片/视频 |
-- **突破 15 秒**：时长可填 4–120 秒，超过 15 秒时后端自动分段续写并拼接（见下文）
+- **突破 15 秒**：时长可填 **4–1800 秒**（上限由 `MAX_DURATION_SEC` 控制），超过 15 秒时后端自动分段续写并拼接（见下文）
 - **排队提示**：多用户时任务串行排队，界面显示「第 N 位（共 M 个排队）」与分段进度
 - **作品列表**：排队 / 生成中 / 完成 / 失败 状态实时刷新，可在线播放、下载、删除
 - 时长、画幅、768p/2K、采样步数、flow_shift、seed 等参数可调
@@ -119,22 +119,6 @@ docker compose logs -f
 
 ---
 
-## 版本四：Kubernetes 部署
-
-一套完整清单，`kubectl apply -k deploy/k8s/` 部署。含 Namespace / ConfigMap / Secret /
-PVC / Deployment / Service / Ingress，镜像用官方发布的 `cnrock/h3-studio`。
-
-```bash
-# 先改三处：01-configmap.yaml（域名/H3 地址/SMTP）、02-secret.yaml（密钥）、06-ingress.yaml（域名）
-kubectl apply -k deploy/k8s/
-kubectl -n h3-studio get pods,svc,ingress
-```
-
-关键约束：**必须单副本**（队列进程内串行 + SQLite 单写）；视视频生成最长 30 分钟，
-Ingress 已用注解放宽读超时到 1800s；`/app/data` 挂 RWO PVC。详见 [`deploy/k8s/README.md`](deploy/k8s/README.md)。
-
----
-
 ## 版本三：公网 VPS 运行
 
 ```bash
@@ -153,6 +137,22 @@ npm install && npm start          # 只监听 127.0.0.1:8787
 sudo cp deploy/nginx.conf /etc/nginx/conf.d/h3-studio.conf
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+---
+
+## 版本四：Kubernetes 部署
+
+一套完整清单，`kubectl apply -k deploy/k8s/` 部署。含 Namespace / ConfigMap / Secret /
+PVC / Deployment / Service / Ingress，镜像用官方发布的 `cnrock/h3-studio`。
+
+```bash
+# 先改三处：01-configmap.yaml（域名/H3 地址/SMTP）、02-secret.yaml（密钥）、06-ingress.yaml（域名）
+kubectl apply -k deploy/k8s/
+kubectl -n h3-studio get pods,svc,ingress
+```
+
+关键约束：**必须单副本**（队列进程内串行 + SQLite 单写）；视视频生成最长 30 分钟，
+Ingress 已用注解放宽读超时到 1800s；`/app/data` 挂 RWO PVC。详见 [`deploy/k8s/README.md`](deploy/k8s/README.md)。
 
 ---
 
@@ -256,7 +256,7 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 
 ### 部署必做
 1. **改 `JWT_SECRET`** 为随机长串（默认值可被伪造 token）
-2. **H3 后端不要暴露公网**：`210.140.215.4:32206` 应只允许本机/内网访问
+2. **H3 后端不要暴露公网**：`<你的H3内网地址:端口>` 应只允许本机/内网访问
    （建议安全组/防火墙只放行 H3 Studio 所在主机，或仅监听内网）
 3. **上 HTTPS**：公网部署务必用 Nginx + Let's Encrypt，并设 `ENABLE_HSTS=true`
    （同时会自动给 Cookie 加 `Secure`）
@@ -296,6 +296,9 @@ H3 单段 12~13 秒视频要 4~6 分钟，第 1 段（≈262s）能过，第 2 �
 修复（改 deployment 的 args）：
 - **去掉 `--task-type fl2va`**，让服务同时加载两个 DiT（180GB 卡足够）；
 - serve 路径指向**仓库根目录**，而不是 `FL2VA/` 子目录。
+
+> ⚠️ 注意：这么改之后，若根目录残留 FastH3 标记文件，服务会起不来——请一并阅读
+> 下文「serve 根目录残留 FastH3 标记文件，服务无法启动」。
 
 ```yaml
 args:
@@ -362,6 +365,41 @@ H3_REF2VA_API_KEY=          # 若该后端需要鉴权
 
 网站会按 `mode` 自动路由：`ref2va` → `H3_BASE_URL_REF2VA`，其余 → `H3_BASE_URL`。
 若 `H3_BASE_URL_REF2VA` 留空，则所有任务都发往默认后端（旧行为，兼容单后端部署）。
+
+---
+
+## 错误排查：serve 根目录残留 FastH3 标记文件，服务无法启动
+
+**症状**：去掉 `--task-type`、并让 `vllm serve` 指向仓库根目录后，服务起不来，Orchestrator
+初始化报 `ValueError: FastH3 V2 requires --diffusion-attention-backend FASTVIDEO_VSA`。
+
+**根因**：根目录残留了 FastH3 的标记文件，导致 H3 把普通权重误判为 FastH3 模块化版本。
+
+- `checkpoint.py::is_minimax_h3_modular()` 的判定是「目录下存在
+  `modular_model_index.json` **或** `fastvideo_inference.json`」即视为 modular；
+- 未显式指定 `--task-type` 时其默认值为 `auto`，而 `pipeline_minimax_h3.py` 中
+  `if modular and task_type == "auto": self.partition = "fl2va"`，于是走进 FastH3 契约校验；
+- `fasth3_checkpoint.py::check_serving_contract()` 是**硬校验**，无开关可跳过，
+  只接受 `--diffusion-attention-backend FASTVIDEO_VSA`，否则抛错、进程退出。
+
+**修复（推荐，保留单进程三任务）**：把标记文件移出 serve 根目录，走非 modular 分支即可
+同时支持 `t2va` / `fl2va` / `ref2va`：
+
+```bash
+cd <serving-model-path>
+mkdir -p _fasth3_markers_backup
+mv fastvideo_inference.json modular_model_index.json provenance.json _fasth3_markers_backup/ 2>/dev/null
+```
+
+保持「serve 根目录 + 不加 `--task-type` + 原 `--diffusion-attention-backend`」，重启后
+`curl http://<host>:8003/health` 应正常。
+
+**若确实要用 FastH3 V2（8 步蒸馏版）**：保留标记文件，但必须同时加
+`--task-type fl2va --diffusion-attention-backend FASTVIDEO_VSA`，且此后仅 `fl2va` / `t2va`
+可用，`ref2va` 不可用。
+
+**兜底方案**：起两个进程分别 serve 子目录（`FL2VA` + `--task-type fl2va` → 8003；
+`Ref2VA` + `--task-type ref2va` → 8004），前提是子目录内不含上述标记文件。
 
 ---
 
