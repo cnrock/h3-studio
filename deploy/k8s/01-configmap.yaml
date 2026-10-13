@@ -48,8 +48,12 @@ data:
   MAX_DURATION_SEC: "1800"
   # 详细日志（分段时长/音视频时长/拼接结果）。排查长视频音画问题时设为 "1"。
   H3_DEBUG: "0"
-  # 计费：生成 1 秒视频扣多少点数（可填小数）。"0" = 不计费，只做耗时/卡时统计。
+  # 计费开关："off"=不计费只统计；"second"=按秒计费；"job"=按条计费。
+  CREDITS_MODE: "off"
+  # 按秒费率（可小数），仅 CREDITS_MODE=second 生效。
   CREDITS_PER_SECOND: "0"
+  # 按条费率（可小数），仅 CREDITS_MODE=job 生效。
+  CREDITS_PER_JOB: "0"
   # ref2va 参考视频单个时长上限（秒）。H3 硬校验为 2–15 秒，超长会自动截取。
   MAX_REF_VIDEO_SEC: "15"
 

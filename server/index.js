@@ -347,7 +347,9 @@ app.get('/api/config', (_req, res) => {
       maxFiles: config.limits.maxFiles,
       maxDurationSec: config.limits.maxDurationSec,
       maxRefVideoSec: config.limits.maxRefVideoSec,
+      creditsMode: config.creditsMode,
       creditsPerSecond: config.creditsPerSecond,
+      creditsPerJob: config.creditsPerJob,
     },
     // 分辨率预设（按画幅比例）、帧网格、对齐粒度 —— 供前端联动与提示
     aspectPresets: presetsForClient(),

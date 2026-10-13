@@ -8,7 +8,7 @@ const MODE_HINTS = {
   ref2va: '上传参考图片 / 视频片段（可混合，最多 9 个），模型会参考其主体、风格、动作。',
 };
 
-const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15, maxDurationSec: 1800, creditsPerSecond: 0 } };
+const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15, maxDurationSec: 1800, creditsMode: 'off', creditsPerSecond: 0, creditsPerJob: 0 } };
 
 function banner(el, msg, type = 'err') {
   el.textContent = msg;
@@ -325,7 +325,9 @@ const fmtClock = (ts) => (ts ? new Date(ts).toLocaleTimeString('zh-CN', { hour12
 function renderStats(stats) {
   const box = $('#stats');
   if (!box || !stats) return;
-  const rate = stats.creditsPerSecond || 0;
+  const mode = stats.creditsMode || 'off';
+  const billing = mode === 'second' ? `按秒 ${stats.creditsPerSecond}/秒` : mode === 'job' ? `按条 ${stats.creditsPerJob}/条` : '未开启';
+  const showCredits = mode !== 'off';
   const cell = (label, value, sub = '') =>
     `<div class="stat"><div class="stat-v">${value}</div><div class="stat-l">${label}${sub ? ` <span class="muted">${sub}</span>` : ''}</div></div>`;
   const t = stats.today || {};
@@ -335,14 +337,14 @@ function renderStats(stats) {
     <div class="stats-grid">
       ${cell('今日生成', `${t.done || 0} 条`, t.failed ? `失败 ${t.failed}` : '')}
       ${cell('今日成片', `${(t.videoSeconds || 0).toFixed(0)} 秒`)}
-      ${cell('今日卡时', `${(t.genMinutes || 0).toFixed(1)} 分`, rate ? `≈ ${t.credits || 0} 点` : '')}
+      ${cell('今日卡时', `${(t.genMinutes || 0).toFixed(1)} 分`, showCredits ? `≈ ${t.credits || 0} 点` : '')}
       ${cell('今日总耗时', `${(t.totalMinutes || 0).toFixed(1)} 分`, t.waitMinutes ? `含排队 ${t.waitMinutes.toFixed(1)} 分` : '')}
       ${cell('累计生成', `${a.done || 0} 条`, a.failed ? `失败 ${a.failed}` : '')}
       ${cell('累计成片', `${(a.videoSeconds || 0).toFixed(0)} 秒`)}
-      ${cell('累计卡时', `${(a.genMinutes || 0).toFixed(1)} 分`, rate ? `≈ ${a.credits || 0} 点` : '')}
+      ${cell('累计卡时', `${(a.genMinutes || 0).toFixed(1)} 分`, showCredits ? `≈ ${a.credits || 0} 点` : '')}
       ${cell('累计总耗时', `${(a.totalMinutes || 0).toFixed(1)} 分`, a.waitMinutes ? `含排队 ${a.waitMinutes.toFixed(1)} 分` : '')}
     </div>
-    <div class="muted" style="font-size:12px;margin-top:8px">卡时 = 真正占用 GPU 的生成时长（不含排队）；总耗时 = 提交到完成。</div>`;
+    <div class="muted" style="font-size:12px;margin-top:8px">卡时 = 真正占用 GPU 的生成时长（不含排队）；总耗时 = 提交到完成。计费：${billing}。</div>`;
 }
 
 function jobCard(j) {

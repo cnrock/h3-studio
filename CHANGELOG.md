@@ -2,6 +2,17 @@
 
 H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到 `v2.0+`。
 
+## v1.8.1
+
+- **计费改为可选模式开关** `CREDITS_MODE`（三选一）：
+  - `off`（默认）：不计费，只做耗时/卡时统计；
+  - `second`：**按秒计费**，`CREDITS_PER_SECOND` 为每秒费率（可小数）；扣点 = 成片秒数 × 费率，**向上取整**；
+  - `job`：**按条计费**，`CREDITS_PER_JOB` 为每条费率（可小数）；扣点 = 条数 × 费率，向上取整。
+- 未显式设 `CREDITS_MODE` 时按费率自动推断（`CREDITS_PER_JOB`>0 用 `job`，`CREDITS_PER_SECOND`>0 用 `second`），
+  从 v1.8 平滑升级、旧配置行为不变。
+- `/api/config` 与 `/api/stats` 返回 `creditsMode` / `creditsPerSecond` / `creditsPerJob`；前端汇总面板底部标注当前计费模式与费率。
+- 同步：`.env` 示例与 K8s ConfigMap 补 `CREDITS_MODE` / `CREDITS_PER_JOB`；K8s 镜像 tag 升至 1.8.1。
+
 ## v1.8
 
 - **新增「耗时与用量统计」**：每个作品记录并展示一条时间线——**提交时间、排队等待、生成耗时、完成时间、总计**。

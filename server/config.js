@@ -27,6 +27,15 @@ const bool = (v, d) => (v === undefined ? d : /^(1|true|yes|on)$/i.test(String(v
 const int = (v, d) => (v === undefined || v === '' ? d : Number.parseInt(v, 10));
 const num = (v, d) => (v === undefined || v === '' || Number.isNaN(Number(v)) ? d : Number(v));
 
+// 计费模式：显式 CREDITS_MODE 优先；未设时按费率推断，保持与旧配置兼容。
+function creditsMode() {
+  const raw = String(process.env.CREDITS_MODE || '').toLowerCase();
+  if (raw === 'off' || raw === 'second' || raw === 'job') return raw;
+  if (num(process.env.CREDITS_PER_JOB, 0) > 0) return 'job';
+  if (num(process.env.CREDITS_PER_SECOND, 0) > 0) return 'second';
+  return 'off';
+}
+
 export const config = {
   root,
   deployment: process.env.DEPLOYMENT || 'internal', // internal | docker | vps
@@ -40,8 +49,13 @@ export const config = {
   skipEmailVerification: bool(process.env.SKIP_EMAIL_VERIFICATION, false),
   // 详细日志（分段时长/返回视频与音频时长/拼接结果）。设 H3_DEBUG=1 打开。
   debug: bool(process.env.H3_DEBUG, false),
-  // 计费：生成 1 秒视频扣多少点（0 = 不计费，仅统计；默认 0 不影响现有账户余额）
+  // 计费开关：off=不计费（仅统计，默认）；second=按【秒】计费；job=按【条】计费。
+  // 显式设 CREDITS_MODE 优先；未设时按费率推断（CREDITS_PER_JOB>0 则 job，CREDITS_PER_SECOND>0 则 second）。
+  creditsMode: creditsMode(),
+  // 按秒计费费率：生成 1 秒扣多少点（可小数）。仅 creditsMode=second 时生效。
   creditsPerSecond: num(process.env.CREDITS_PER_SECOND, 0),
+  // 按条计费：每完成一条视频扣多少点（可小数）。仅 creditsMode=job 时生效。
+  creditsPerJob: num(process.env.CREDITS_PER_JOB, 0),
 
   // ---- MiniMax H3 backend (vLLM-Omni) ----
   //

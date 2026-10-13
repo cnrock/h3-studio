@@ -223,14 +223,18 @@ async function runJob(jobId) {
 }
 
 /**
- * 计费：config.creditsPerSecond>0 时按成片秒数扣点（向上取整），并把消耗写回任务。
- * 余额不足则按现有余额扣到 0，允许小幅透支，但任务已生成不回收。
- * 返回本次消耗点数（默认配置为 0，即不计费）。
+ * 计费：按 config.creditsMode 扣点，并把消耗写回任务。
+ *   second：按成片秒数计费，cost = ceil(seconds * creditsPerSecond)
+ *   job   ：按条数计费，cost = ceil(creditsPerJob)
+ *   off   ：不计费，返回 null
+ * 余额不足则扣到 0（允许透支，任务已生成不回收）。返回本次消耗点数。
  */
 function chargeFor(jobId, userId, seconds) {
-  const rate = config.creditsPerSecond;
-  if (!rate || !seconds) return null;
-  const cost = Math.ceil(seconds * rate);
+  const mode = config.creditsMode;
+  let cost = 0;
+  if (mode === 'second') cost = Math.ceil((seconds || 0) * config.creditsPerSecond);
+  else if (mode === 'job') cost = Math.ceil(config.creditsPerJob);
+  if (!cost) return null;
   const u = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId);
   if (!u) return cost;
   const left = Math.max(0, (u.credits || 0) - cost);
@@ -279,7 +283,9 @@ export function statsForUser(userId) {
     };
   };
   return {
+    creditsMode: config.creditsMode,
     creditsPerSecond: config.creditsPerSecond,
+    creditsPerJob: config.creditsPerJob,
     today: agg('AND created_at >= ?', [userId, dayStart]),
     all: agg('', [userId]),
   };
