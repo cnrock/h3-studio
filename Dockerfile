@@ -13,6 +13,17 @@ WORKDIR /app
 COPY --from=ffmpeg /ffmpeg /usr/bin/ffmpeg
 COPY --from=ffmpeg /ffprobe /usr/bin/ffprobe
 
+# curl / vim：容器内排障用（curl 探 vLLM 端点、vim 临时改文件）。
+# bullseye 已进 LTS 尾声，官方 security 源常见 404（vim-tiny/curl 的 .deb 都拉不到），
+# 故改用 archive.debian.org 归档源；Check-Valid-Until=false 因归档源 Release 已过期。
+RUN set -eux; \
+    rm -f /etc/apt/sources.list.d/*; \
+    printf 'deb http://archive.debian.org/debian bullseye main\ndeb http://archive.debian.org/debian-security bullseye-security main\n' \
+      > /etc/apt/sources.list; \
+    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=3 update -qq; \
+    apt-get install -y --no-install-recommends curl vim-tiny; \
+    rm -rf /var/lib/apt/lists/*
+
 # Install dependencies first (better layer caching)
 COPY package.json ./
 RUN npm install --omit=dev --no-audit --no-fund

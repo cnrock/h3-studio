@@ -5,6 +5,16 @@ H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到
 > README 与 CHANGELOG 的章节均使用语义化版本号（`v1.x`），不再出现早期 `v12` 之类旧编号；
 > 修复/排查类章节按真实版本号升序排列。
 
+## v1.9.1
+
+容器内新增排障工具：**curl** 与 **vim**（`vim-tiny`），方便进 Pod 后直接探测 vLLM 端点、
+临时查看/修改文件，无需再 `kubectl exec` 到其它工具容器。
+
+- `Dockerfile`：安装 `curl vim-tiny`。因 bullseye 已进入 LTS 尾声，官方 security 源的
+  `curl`/`vim-tiny` 包路径频繁 404，改用 `archive.debian.org` 归档源
+  （配 `Acquire::Check-Valid-Until=false`），并在安装后清理 apt 列表以控制镜像体积。
+- 无功能/接口变更；k8s 清单镜像 tag 同步升至 `1.9.1`。
+
 ## v1.9.0
 
 新增「提示词助手」三项功能（服务端实现，不需要本地显存）。背景：H3 内置文本编码器是裁剪版
