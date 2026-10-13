@@ -68,7 +68,7 @@ export const config = {
   // 若只有一个后端（旧配置），所有任务都发到它；
   // 若单独配置了 H3_BASE_URL_REF2VA，则 ref2va 走该后端，其余走默认后端。
   h3: {
-    baseUrl: (process.env.H3_BASE_URL || 'http://192.0.2.10:8003').replace(/\/+$/, ''),
+    baseUrl: (process.env.H3_BASE_URL || 'http://10.1.10.34:32206').replace(/\/+$/, ''),
     // 可选：ref2va 专用后端（serve Ref2VA 分区的进程）
     ref2vaBaseUrl: (process.env.H3_BASE_URL_REF2VA || '').replace(/\/+$/, ''),
     apiKey: process.env.H3_API_KEY || '',
@@ -91,7 +91,7 @@ export const config = {
   },
 
   smtp: {
-    host: process.env.SMTP_HOST || 'smtp.example.com',
+    host: process.env.SMTP_HOST || 'smtp.88.com',
     port: int(process.env.SMTP_PORT, 25),
     secure: bool(process.env.SMTP_SECURE, false), // false => STARTTLS optional
     requireTLS: bool(process.env.SMTP_REQUIRE_TLS, false),
@@ -99,9 +99,22 @@ export const config = {
     pass: process.env.SMTP_PASS || '',
     from: process.env.SMTP_FROM || process.env.SMTP_USER || 'no-reply@example.com',
     fromName: process.env.SMTP_FROM_NAME || 'H3 Studio',
-    // Some SMTP servers (e.g. smtp.example.com) present a cert that doesn't match the
+    // Some SMTP servers (e.g. smtp.88.com) present a cert that doesn't match the
     // hostname. Set SMTP_TLS_REJECT_UNAUTHORIZED=false to allow it.
     rejectUnauthorized: bool(process.env.SMTP_TLS_REJECT_UNAUTHORIZED, true),
+  },
+
+  // ---- 提示词 AI 助手（v1.9）----
+  // 任一 OpenAI 兼容端点即可（本地 vLLM / 网关 / 云端）。留空则前端隐藏「AI 重写」按钮。
+  // 模型名建议带供应商前缀（如 customonrouter/gpt-6-sol），识别能力由 visionModel 承担。
+  llm: {
+    baseUrl: (process.env.LLM_BASE_URL || '').replace(/\/+$/, ''),
+    apiKey: process.env.LLM_API_KEY || '',
+    textModel: process.env.LLM_TEXT_MODEL || '',
+    visionModel: process.env.LLM_VISION_MODEL || '',
+    timeoutMs: int(process.env.LLM_TIMEOUT_MS, 120000),
+    // 单次重写/识图请求的图片上限（字节）；超限的参考图会被跳过
+    maxImageBytes: int(process.env.LLM_MAX_IMAGE_BYTES, 8 * 1024 * 1024),
   },
 
   dbFile: process.env.DB_FILE || path.join(root, 'data', 'h3studio.db'),

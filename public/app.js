@@ -272,6 +272,100 @@ const updatePromptCount = (len) => {
 };
 $('#prompt').addEventListener('input', (e) => updatePromptCount(e.target.value.length));
 
+// ---------- prompt assistant (v1.9) ----------
+/** 当前上传素材的类型序列（image,video,audio…），与服务端标签编号规则一致 */
+function refTypeItems() {
+  return state.files.map((f) => (f.type.startsWith('video') ? 'video' : f.type.startsWith('audio') ? 'audio' : 'image'));
+}
+
+function renderCheck(check) {
+  const panel = $('#checkPanel');
+  const list = $('#checkList');
+  const findings = (check && check.findings) || [];
+  const warns = findings.filter((f) => f.level === 'warn').length;
+  const notes = findings.filter((f) => f.level === 'note').length;
+  $('#checkSummary').textContent = findings.length
+    ? `自检结果：${warns} 条警告 · ${notes} 条提示（只会提示，不会拦截提交）`
+    : '自检结果：未发现问题 ✔';
+  list.textContent = findings.length
+    ? findings.map((f) => `${f.level === 'warn' ? '!' : '-'} ${f.message}`).join('\n')
+    : '(无发现) 结构与字段看起来都合规。';
+  list.className = warns ? 'has-warn' : '';
+  panel.classList.remove('hidden');
+}
+
+$('#checkClose').onclick = () => $('#checkPanel').classList.add('hidden');
+
+$('#checkBtn').onclick = async () => {
+  const prompt = $('#prompt').value.trim();
+  if (!prompt) return banner($('#genBanner'), '请先输入提示词');
+  const btn = $('#checkBtn');
+  btn.disabled = true;
+  try {
+    const d = await api('/api/prompt/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, mode: state.mode, duration: Number($('#duration').value) || 0, refItems: refTypeItems().join(',') }),
+    });
+    renderCheck(d);
+  } catch (err) {
+    banner($('#genBanner'), err.message);
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+$('#rewriteBtn').onclick = async () => {
+  hide($('#genBanner'));
+  const prompt = $('#prompt').value.trim();
+  if (!prompt) return banner($('#genBanner'), '请先写一句想法，我再帮你重写');
+  const btn = $('#rewriteBtn');
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '重写中…';
+  try {
+    const d = await api('/api/prompt/rewrite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, mode: state.mode, duration: Number($('#duration').value) || 5, refItems: refTypeItems().join(',') }),
+    });
+    $('#prompt').value = d.prompt;
+    updatePromptCount(d.prompt.length);
+    if (d.check) renderCheck(d.check);
+    banner($('#genBanner'), `已重写（${d.model || 'LLM'}），并自动跑了一遍自检。可再手动修改后提交。`, 'ok');
+  } catch (err) {
+    banner($('#genBanner'), err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+};
+
+$('#captionBtn').onclick = async () => {
+  hide($('#genBanner'));
+  if (!state.files.length) return banner($('#genBanner'), '请先上传参考素材');
+  const btn = $('#captionBtn');
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '识图中…';
+  try {
+    const fd = new FormData();
+    fd.set('mode', 'ref2va');
+    state.files.forEach((f) => fd.append('files', f));
+    const d = await api('/api/prompt/caption', { method: 'POST', body: fd });
+    const ta = $('#prompt');
+    const sep = ta.value.trim() ? '\n\n' : '';
+    ta.value = ta.value + sep + '# 参考素材描述\n' + d.text;
+    updatePromptCount(ta.value.length);
+    banner($('#genBanner'), '已根据参考素材生成描述并追加到提示词，可直接用于「AI 重写」。', 'ok');
+  } catch (err) {
+    banner($('#genBanner'), err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+};
+
 // ---------- generate ----------
 $('#generateBtn').onclick = async () => {
   hide($('#genBanner'));
@@ -498,6 +592,15 @@ const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&a
     if (cfg && cfg.limits) state.limits = { ...state.limits, ...cfg.limits };
     if (cfg && cfg.aspectPresets) state.aspectPresets = cfg.aspectPresets;
     if (cfg && cfg.frameGrid) state.frameGrid = { ...state.frameGrid, ...cfg.frameGrid };
+    // 提示词助手可用性：未配置的服务端把按钮藏起来，避免点了报错
+    if (cfg && cfg.assistant) {
+      $('#rewriteBtn').hidden = !cfg.assistant.rewrite;
+      $('#captionBtn').hidden = !cfg.assistant.vision;
+      const parts = [];
+      if (cfg.assistant.rewrite) parts.push('AI 重写');
+      if (cfg.assistant.vision) parts.push('素材识图');
+      $('#assistNote').textContent = parts.length ? `已启用：${parts.join(' / ')}` : '（服务端未配置提示词助手）';
+    }
   } catch { /* 保留默认值 */ }
   // 时长上限以服务端为准，避免 UI 填得进去、后端却静默截断
   {

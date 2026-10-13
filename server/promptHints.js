@@ -79,6 +79,16 @@ export function ref2vaTagList(files = []) {
   });
 }
 
+/**
+ * 由「类型序列」生成标签清单，用于线上接口传参：items=['image','video']。
+ * 复用 ref2vaTagList 的编号规则（类型名 + 整体序号），并附带 mimetype 便于下游判断。
+ */
+export function tagsFromTypes(types = []) {
+  return ref2vaTagList(
+    types.map((t) => ({ mimetype: t.startsWith('video') ? 'video/mp4' : t.startsWith('audio') ? 'audio/mpeg' : 'image/png' })),
+  ).map((r) => ({ ...r, mimetype: types[r.order - 1].startsWith('video') ? 'video/mp4' : types[r.order - 1].startsWith('audio') ? 'audio/mpeg' : 'image/png' }));
+}
+
 /** R2V 六段式模板（顺序固定） */
 export const REF2VA_TEMPLATE = `subject_definitions: 给每个参考内容定义标签与特征，例如 <Subject 1> 是一位穿深色风衣的中年男性，<Picture 2> 是暖色调夜景街道。
 summary: [任务类型] 一句话概括你要做什么，例如 [Reference generation] 让 <Subject 1> 在 <Picture 2> 的街道场景中行走。

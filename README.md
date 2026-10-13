@@ -22,6 +22,10 @@
 - **排队提示**：多用户时任务串行排队，界面显示「第 N 位（共 M 个排队）」与分段进度
 - **耗时与用量统计（v1.8）**：每个作品显示提交/完成时间、排队等待、生成耗时、总计；作品列表顶部汇总「今日 / 累计」的条数、成片秒数、卡时（生成机时）、总耗时；计费开关（v1.8.1）支持**按秒 / 按条**计费并累计消耗
 - **作品列表**：排队 / 生成中 / 完成 / 失败 状态实时刷新，可在线播放、下载、删除
+- **提示词助手（v1.9）**：
+  - **提示词自检**：提交前静态体检，按 MiniMax-H3 官方写作规范给出 `!` 警告 / `-` 提示（镜头结构、切点时间、`<d>` 对白标记、参考素材双向核对、六段式字段账目、特效 token、时间戳帧网格吸附等）。**只提示不拦截**。
+  - **AI 重写**：一句大白话 → 合规的 H3 提示词（三/六段式）。需服务端配置 LLM（见 `LLM_*`）。
+  - **描述素材**：上传参考图后，用识图模型自动生成文字描述，追加进提示词。需服务端配置 `LLM_VISION_MODEL`。
 - 时长、画幅、768p/2K、采样步数、flow_shift、seed 等参数可调
 - 上传体积/数量限制可配；失败自动重试 1 次
 
@@ -127,7 +131,7 @@ node scripts/probe-h3.mjs      # 确认能连上 H3（/health、/v1/models）
 cp env.internal.example .env
 # 关键项：
 #   PUBLIC_BASE_URL=http://<本机内网IP>:8787   # 邮件里的激活链接用它
-#   H3_BASE_URL=http://192.0.2.10:8003
+#   H3_BASE_URL=http://10.1.10.34:32206
 npm install
 npm start
 # 浏览器打开 http://<本机内网IP>:8787
@@ -212,7 +216,7 @@ Ingress 已用注解放宽读超时到 1800s；`/app/data` 挂 RWO PVC。详见 
 你的示例命令：
 
 ```bash
-curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
+curl -sS -X POST http://10.1.10.34:32206/v1/videos/sync \
   -F 'prompt="..."' \
   -F 'width=1344' -F 'height=768' -F 'aspect_ratio=16:9' \
   -F 'fps=24' -F 'num_inference_steps=50' -F 'flow_shift=12' -F 'seed=1101' \
@@ -233,7 +237,7 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 | `DEPLOYMENT` | `internal` | 形态标识（展示用） |
 | `PORT` | `8787` | 监听端口 |
 | `PUBLIC_BASE_URL` | 空 | 邮件链接用的公开地址；空则按请求 Host 推断 |
-| `H3_BASE_URL` | `http://192.0.2.10:8003` | H3 后端地址 |
+| `H3_BASE_URL` | `http://10.1.10.34:32206` | H3 后端地址 |
 | `H3_API_KEY` | 空 | 后端鉴权（可选） |
 | `H3_TIMEOUT_MS` | `1800000` | 同步生成超时（30 分钟；长视频分段会累加） |
 | `JWT_SECRET` | 开发串 | **生产必改** |
@@ -248,6 +252,12 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 | `CREDITS_MODE` | `off` | 计费模式：`off` / `second`（按秒）/ `job`（按条） |
 | `CREDITS_PER_SECOND` | `0` | 按秒费率（点/秒，可小数）；仅 `second` 生效 |
 | `CREDITS_PER_JOB` | `0` | 按条费率（点/条，可小数）；仅 `job` 生效 |
+| `LLM_BASE_URL` | 空 | 提示词助手（v1.9）OpenAI 兼容端点；空则隐藏「AI 重写」 |
+| `LLM_API_KEY` | 空 | 提示词助手密钥（可空） |
+| `LLM_TEXT_MODEL` | 空 | 重写用的文本模型 |
+| `LLM_VISION_MODEL` | 空 | 识图模型；空则隐藏「描述素材」 |
+| `LLM_TIMEOUT_MS` | `120000` | 提示词助手单次调用超时 |
+| `LLM_MAX_IMAGE_BYTES` | `8388608` | 描述素材时单张参考图上限 |
 
 ---
 
@@ -293,7 +303,7 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 - 任务提交 → 入队 → 执行 → （后端不可达时）状态置 `error` 并记录原因，链路完整
 - 前端为无构建的原生实现，直接由 Express 托管
 
-> 生成结果的真实成功链路需在能连通 H3 的机器上验证（本机跨网段访问不到 `192.0.2.10`）。
+> 生成结果的真实成功链路需在能连通 H3 的机器上验证（本机跨网段访问不到 `10.1.10.34`）。
 > 请先跑 `node scripts/probe-h3.mjs --gen` 做一次最小生成。
 
 ---
@@ -679,6 +689,57 @@ non_diegetic_music   配乐
 > 小贴士：本地没有官方的 Context-IR 改写模块，可让任意 LLM 按
 > `https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md`
 > 把你的大白话改写成三字段格式。
+
+---
+
+## 提示词助手（v1.9）
+
+> 背景：H3 内置的文本编码器是**裁剪版 Qwen3-VL-32B**（仅保留前 50 层，砍掉 `lm_head` 与 final norm），
+> **没有生成能力**，只把文字压成特征隐向量喂给 DiT。所以手写「一段连贯的散文」会让镜头/环境音/配乐
+> 三类特征在隐空间互相干涉，直接导致镜头乱切、音画打架。前端必须有一个独立 LLM 充当「执行导演」。
+> 本节的三项功能正是补齐这一环（参考社区项目 `pytraveler/MiniMax-H3-Prompt-Rewriter-ComfyUI` 的做法，
+> 但本站是服务端实现，不需要本地显存）。
+
+### 1）提示词自检（`POST /api/prompt/check`）
+
+纯静态、不调模型、毫秒级。检查项（`!` = H3 很可能读错；`-` = 规范只是建议）：
+
+| 类别 | 检查内容 |
+|---|---|
+| 镜头结构 | `[Shot 1]` 是否起头、编号是否从 1 连续、`At MM:SS.mmm` 切点是否严格递增且在时长内 |
+| 时间戳网格 | 分镜里的时间轴（`0:00–0:04`）是否落在 **17n+5** 物理帧网格上，否则提示会静默舍入 |
+| 对白标记 | `<d></d>` 是否成对，每段是否以 `[语言]` 标签开头 |
+| 参考素材双向核对 | 当前任务扛不住的标签（T2VA 里的任何标签、FL2VA 里的 Video/Audio）；**接了却从未被引用的素材** |
+| 六段式账目（ref2va） | 六个字段是否齐全；每个 `<Subject N>` 是否在 `retention_analysis` 有交代；`detailed_description` 是否 350–500 词 |
+| 对齐行 | FL2VA 是否缺对齐指令（服务端会自动注入，此处仅提醒） |
+| 特效 token | 大写 `Embedding:` / token 粘词 / 末尾句号会被静默丢弃；非官方 10 个的名字只记提示 |
+
+前端「✓ 提示词自检」按钮；重写后会**自动跑一遍**并把结果附在响应里（`check` 字段）。
+**发现只被说出来，从不拦截提交**——模型有时把规则掰弯是对的，是否接受由你决定。
+
+### 2）AI 重写（`POST /api/prompt/rewrite`）
+
+把一句想法按当前模式（t2va / fl2va / ref2va）重写成对应结构，并在 system prompt 里注入官方写作规范、
+目标时长（已吸附的帧网格值）与可用参考标签。返回 `prompt` + `model` + `usage` + `check`。
+
+### 3）描述素材（`POST /api/prompt/caption`）
+
+把上传的参考图片交给识图模型，逐张生成「`<Picture N>`：主体/场景/色调/构图」描述，追加进提示词，
+可直接再喂给「AI 重写」。视频/音频素材不解码，只列出标签提示人工引用。
+
+### 配置（环境变量）
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `LLM_BASE_URL` | 空 | OpenAI 兼容端点（如 `https://onrouter.cn/v1`）。空则隐藏「AI 重写」 |
+| `LLM_API_KEY` | 空 | 端点密钥（可空，如本地 vLLM） |
+| `LLM_TEXT_MODEL` | 空 | 重写用的文本模型（如 `customonrouter/gpt-6-sol`） |
+| `LLM_VISION_MODEL` | 空 | 识图模型（如 `customonrouter/grok-4.7`）。空则隐藏「描述素材」 |
+| `LLM_TIMEOUT_MS` | `120000` | 单次调用超时 |
+| `LLM_MAX_IMAGE_BYTES` | `8388608` | 单张参考图上限（超限跳过） |
+
+> 未配置时对应按钮自动隐藏（`/api/config` 返回 `assistant:{rewrite,vision}`），不会点了报错。
+> 密钥只从环境变量读入，出站请求带 `Authorization` 头，不落盘、不回显。
 
 ---
 

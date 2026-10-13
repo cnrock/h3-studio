@@ -75,6 +75,15 @@
 
       <label>提示词 <span class="muted" id="promptCount"></span></label>
       <textarea id="prompt" placeholder="描述你想生成的画面：主体、动作、镜头运动、光线氛围……"></textarea>
+      <div class="actions" style="margin-top:8px">
+        <button type="button" class="ghost" id="rewriteBtn" hidden title="用服务端 LLM 把这段想法重写为合规的 H3 提示词">✨ AI 重写</button>
+        <button type="button" class="ghost" id="checkBtn">✓ 提示词自检</button>
+        <span class="muted" id="assistNote" style="font-size:12px"></span>
+      </div>
+      <div id="checkPanel" class="check hidden">
+        <div class="check-head"><span id="checkSummary"></span><button type="button" class="ghost" id="checkClose" style="padding:2px 8px;font-size:12px">收起</button></div>
+        <pre id="checkList"></pre>
+      </div>
       <p class="muted">超 15 秒时：若提示词是「分镜脚本」（含「镜头 1｜0:00–0:04｜4 秒」这类时间轴），会按镜头自动分段、每段只演自己的剧情；普通提示词则均匀分段并自动加「延续上段、不要重复开头」的指令。</p>
 
       <div id="dropZoneWrap">
@@ -92,6 +101,7 @@
           <div id="tagList" class="muted" style="font-size:13px;line-height:1.9"></div>
           <div class="actions" style="margin-top:10px">
             <button type="button" class="ghost" id="insertTemplateBtn">插入六段式模板</button>
+            <button type="button" class="ghost" id="captionBtn" title="用识图模型为上传的参考素材生成文字描述，填进提示词">🔍 描述素材</button>
           </div>
         </div>
       </details>

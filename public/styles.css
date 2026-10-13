@@ -150,6 +150,12 @@ button.link { background: transparent; border: 0; color: var(--accent); padding:
 .tab.active { background: var(--panel-solid); color: var(--text); box-shadow: var(--shadow-sm); }
 .hidden { display: none !important; }
 
+/* ---------- 提示词自检面板 (v1.9) ---------- */
+.check { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel-2); padding: 12px 14px; }
+.check-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.check pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12.5px; line-height: 1.65; font-family: "SF Mono", ui-monospace, Menlo, monospace; color: var(--text); max-height: 260px; overflow: auto; }
+.check pre.has-warn { color: color-mix(in srgb, var(--warn) 75%, var(--text)); }
+
 /* ---------- 拖拽上传 ---------- */
 .drop {
   border: 1.5px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 26px; text-align: center;

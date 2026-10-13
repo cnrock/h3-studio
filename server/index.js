@@ -13,7 +13,10 @@ import { createJob, deleteJob, enqueue, getJob, listJobs, regenerateJob, statsFo
 import { presetsForClient, normalizeSize, aspectFor, ALIGN } from './resolutions.js';
 import { gridInfo, gridDuration } from './frameGrid.js';
 import { planSegments } from './longvideo.js';
-import { ref2vaScaffold, ref2vaTagList, REF2VA_TEMPLATE } from './promptHints.js';
+import { ref2vaScaffold, ref2vaTagList, REF2VA_TEMPLATE, tagsFromTypes } from './promptHints.js';
+import { checkPrompt, renderFindings } from './promptCheck.js';
+import { rewritePrompt, captionReferences } from './promptWriter.js';
+import { llmChat, llmConfigured, visionConfigured, fileToDataUri } from './llm.js';
 import { log } from './log.js';
 
 fs.mkdirSync(config.dataDir, { recursive: true });
@@ -420,7 +423,94 @@ app.get('/api/config', (_req, res) => {
     aspectPresets: presetsForClient(),
     frameGrid: gridInfo(),
     align: ALIGN,
+    // 提示词 AI 助手可用性（不泄露端点/密钥）
+    assistant: { rewrite: llmConfigured(), vision: visionConfigured() },
   });
+});
+
+// ---------- prompt assistant (v1.9) ----------
+const PROMPT_MODES = new Set(['t2va', 'fl2va', 'ref2va']);
+
+/** 从请求体解析参考素材类型序列 -> 标签清单 */
+function refsFromBody(body) {
+  const items = String(body.refItems || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return tagsFromTypes(items);
+}
+
+// 提示词自检：纯静态，不调模型，毫秒级
+app.post('/api/prompt/check', authMiddleware, (req, res) => {
+  const mode = PROMPT_MODES.has(String(req.body.mode)) ? String(req.body.mode) : 't2va';
+  const duration = Number(req.body.duration) || 0;
+  const refs = refsFromBody(req.body);
+  const files = refs.map((r) => ({ mimetype: r.mimetype, filename: r.tag }));
+  const result = checkPrompt({ prompt: req.body.prompt, mode, duration, files });
+  res.json({
+    findings: result.findings,
+    stats: result.stats,
+    text: renderFindings(result.findings),
+    warnings: result.findings.filter((f) => f.level === 'warn').length,
+    notes: result.findings.filter((f) => f.level === 'note').length,
+  });
+});
+
+// 一键重写/扩写：一句想法 -> 结构化 H3 提示词（需要 LLM）
+app.post('/api/prompt/rewrite', authMiddleware, async (req, res) => {
+  if (!llmConfigured()) return res.status(501).json({ error: '服务端未配置提示词助手（LLM_BASE_URL / LLM_TEXT_MODEL）' });
+  const prompt = String(req.body.prompt || '').trim();
+  if (!prompt) return res.status(400).json({ error: '请输入提示词' });
+  if (prompt.length > config.limits.promptChars) return res.status(400).json({ error: `提示词过长（上限 ${config.limits.promptChars} 字符）` });
+  const mode = PROMPT_MODES.has(String(req.body.mode)) ? String(req.body.mode) : 't2va';
+  const duration = Math.max(4, Math.min(Number(req.body.duration) || 5, config.limits.maxDurationSec));
+  const refs = refsFromBody(req.body);
+  try {
+    const out = await rewritePrompt({ prompt, mode, duration, refs, chat: llmChat });
+    const check = checkPrompt({ prompt: out.text, mode, duration, files: refs.map((r) => ({ mimetype: r.mimetype, filename: r.tag })) });
+    log.info(`提示词重写 user=${req.user.email} mode=${mode} ${duration}s in=${prompt.length}字 out=${out.text.length}字`);
+    res.json({ ok: true, prompt: out.text, model: out.model, usage: out.usage, check });
+  } catch (e) {
+    log.warn(`提示词重写失败：${e.message}`);
+    res.status(502).json({ error: `重写失败：${e.message}` });
+  }
+});
+
+// 参考素材自动描述：上传图/视频 -> 文字描述（需要视觉模型）
+app.post('/api/prompt/caption', authMiddleware, upload.array('files', config.limits.maxFiles), async (req, res) => {
+  if (!visionConfigured()) return res.status(501).json({ error: '服务端未配置识图模型（LLM_VISION_MODEL）' });
+  const mode = PROMPT_MODES.has(String(req.body.mode)) ? String(req.body.mode) : 'ref2va';
+  const uploads = req.files || [];
+  if (!uploads.length) return res.status(400).json({ error: '请先上传参考素材' });
+  // 按上传顺序生成标签（与 ref2vaTagList 一致：类型名 + 序号）
+  const refs = ref2vaTagList(uploads.map((f) => ({ mimetype: f.mimetype, filename: f.originalname })));
+  const files = uploads.map((f, i) => ({
+    tag: refs[i].tag,
+    type: refs[i].type,
+    mimetype: f.mimetype,
+    filename: f.originalname,
+    path: f.path,
+  }));
+  for (const f of files) {
+    if (/^image\//.test(f.mimetype || '')) {
+      try {
+        f.dataUri = fileToDataUri(f.path, f.mimetype);
+      } catch (e) {
+        log.warn(`参考图读取跳过：${e.message}`);
+      }
+    }
+  }
+  try {
+    const out = await captionReferences({ files, mode, visionChat: llmChat });
+    log.info(`参考素材描述 user=${req.user.email} 图片=${files.filter((f) => f.dataUri).length}/${files.length}`);
+    res.json({ ok: true, text: out.text, tags: refs });
+  } catch (e) {
+    log.warn(`参考素材描述失败：${e.message}`);
+    res.status(502).json({ error: `识图失败：${e.message}` });
+  } finally {
+    // 清理临时上传（描述用图不需要留存）
+    for (const f of uploads) fs.promises.unlink(f.path).catch(() => {});
+  }
 });
 
 // 公开：R2V 标签清单与六段式模板（非敏感，供前端展示/填充）
