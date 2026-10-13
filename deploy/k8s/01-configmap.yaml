@@ -63,11 +63,12 @@ data:
   MAX_REF_VIDEO_SEC: "15"
 
   # ---- 提示词助手（v1.9）----
-  # OpenAI 兼容端点；留空则隐藏「AI 重写/描述素材」。
-  # 端点可指向同集群内的自建 vLLM Service（如 http://vllm-llm:8000/v1），也可指向云端网关。
-  # Key 不放这里：放 02-secret.yaml 的 LLM_API_KEY（自建 vLLM 不需鉴权则留空）。
-  LLM_BASE_URL: ""
-  LLM_TEXT_MODEL: ""
+  # OpenAI 兼容端点。留空则隐藏「AI 重写/描述素材」（自检不受影响）。
+  # 当前指向内网大模型；若与 H3 后端同段，Pod 网络需可达。
+  # Key 不放这里：需鉴权时放 02-secret.yaml 的 LLM_API_KEY（内网免鉴权则留空）。
+  LLM_BASE_URL: "http://10.1.1.34:32189/v1"
+  LLM_TEXT_MODEL: "deepseekv41flash"
+  # 识图模型：当前内网模型是纯文本，「描述素材」用不了就留空（按钮自动隐藏）。
   LLM_VISION_MODEL: ""
   LLM_TIMEOUT_MS: "120000"
   LLM_MAX_IMAGE_BYTES: "8388608"
