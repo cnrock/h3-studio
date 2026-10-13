@@ -63,7 +63,9 @@ data:
   MAX_REF_VIDEO_SEC: "15"
 
   # ---- 提示词助手（v1.9）----
-  # OpenAI 兼容端点；留空则隐藏「AI 重写/描述素材」。密钥建议放 Secret，不放这里。
+  # OpenAI 兼容端点；留空则隐藏「AI 重写/描述素材」。
+  # 端点可指向同集群内的自建 vLLM Service（如 http://vllm-llm:8000/v1），也可指向云端网关。
+  # Key 不放这里：放 02-secret.yaml 的 LLM_API_KEY（自建 vLLM 不需鉴权则留空）。
   LLM_BASE_URL: ""
   LLM_TEXT_MODEL: ""
   LLM_VISION_MODEL: ""
