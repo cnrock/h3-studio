@@ -467,9 +467,11 @@ app.post('/api/prompt/rewrite', authMiddleware, async (req, res) => {
   const refs = refsFromBody(req.body);
   try {
     const out = await rewritePrompt({ prompt, mode, duration, refs, chat: llmChat });
-    const check = checkPrompt({ prompt: out.text, mode, duration, files: refs.map((r) => ({ mimetype: r.mimetype, filename: r.tag })) });
-    log.info(`提示词重写 user=${req.user.email} mode=${mode} ${duration}s in=${prompt.length}字 out=${out.text.length}字`);
-    res.json({ ok: true, prompt: out.text, model: out.model, usage: out.usage, check });
+    // 自检目标时长：分镜脚本按总时长；其它模式按实际生成时长（超上限时已收敛到 15s）
+    const checkDuration = out.storyboard ? duration : (out.duration ? out.duration.seconds : duration);
+    const check = checkPrompt({ prompt: out.text, mode, duration: checkDuration, files: refs.map((r) => ({ mimetype: r.mimetype, filename: r.tag })) });
+    log.info(`提示词重写 user=${req.user.email} mode=${mode} ${duration}s${out.storyboard ? ' 分镜' : ''} in=${prompt.length}字 out=${out.text.length}字`);
+    res.json({ ok: true, prompt: out.text, model: out.model, usage: out.usage, check, note: out.note || '', storyboard: !!out.storyboard });
   } catch (e) {
     log.warn(`提示词重写失败：${e.message}`);
     res.status(502).json({ error: `重写失败：${e.message}` });

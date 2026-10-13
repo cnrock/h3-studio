@@ -332,7 +332,8 @@ $('#rewriteBtn').onclick = async () => {
     $('#prompt').value = d.prompt;
     updatePromptCount(d.prompt.length);
     if (d.check) renderCheck(d.check);
-    banner($('#genBanner'), `已重写（${d.model || 'LLM'}），并自动跑了一遍自检。可再手动修改后提交。`, 'ok');
+    const head = `已重写（${d.model || 'LLM'}），并自动跑了一遍自检。可再手动修改后提交。`;
+    banner($('#genBanner'), d.note ? `${head}\n${d.note}` : head, d.note ? 'warn' : 'ok');
   } catch (err) {
     banner($('#genBanner'), err.message);
   } finally {

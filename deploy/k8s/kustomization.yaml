@@ -15,4 +15,4 @@ resources:
 # 一处改镜像 tag，全量生效：
 images:
   - name: cnrock/h3-studio
-    newTag: "1.9.1"
+    newTag: "1.9.2"

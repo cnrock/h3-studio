@@ -138,6 +138,7 @@ button.link { background: transparent; border: 0; color: var(--accent); padding:
 .banner.show { display: block; }
 .banner.err { background: color-mix(in srgb, var(--danger) 12%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent); color: var(--danger); }
 .banner.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent); color: color-mix(in srgb, var(--ok) 80%, var(--text)); }
+.banner.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 32%, transparent); color: color-mix(in srgb, var(--warn) 85%, var(--text)); white-space: pre-line; }
 
 /* ---------- 标签页（胶囊） ---------- */
 .tabs { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; background: var(--panel-2); padding: 4px; border-radius: 980px; width: fit-content; }
