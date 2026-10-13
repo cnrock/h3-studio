@@ -26,6 +26,9 @@ data:
   H3_BASE_URL_REF2VA: ""
   H3_TIMEOUT_MS: "1800000"
 
+  # ---- 时区 ----
+  TZ: "Asia/Shanghai"
+
   # ---- 会话 ----
   JWT_EXPIRES_IN: "30d"
 

@@ -237,6 +237,7 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 | `H3_API_KEY` | 空 | 后端鉴权（可选） |
 | `H3_TIMEOUT_MS` | `1800000` | 同步生成超时（30 分钟；长视频分段会累加） |
 | `JWT_SECRET` | 开发串 | **生产必改** |
+| `TZ` | `Asia/Shanghai` | 容器时区；决定日志时间戳（镜像已默认东八区） |
 | `SKIP_EMAIL_VERIFICATION` | `false` | `true` 则注册即可用 |
 | `SMTP_*` | — | 见模板；含 `SMTP_TLS_REJECT_UNAUTHORIZED` |
 | `MAX_IMAGE_MB` / `MAX_VIDEO_MB` / `MAX_FILES` / `PROMPT_CHARS` | 30/50/9/20000 | 上传与提示词限制 |
@@ -262,13 +263,21 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 | `warn` | 仅告警（登录失败、参考视频超长截取、音视频时间戳漂移、分段返回时长不符、某段重试） |
 | `error` | 仅错误（任务失败、请求处理异常） |
 
-日志每行前缀 `[ISO时间] [h3:级别]`，便于 `docker logs | grep h3:error` 之类过滤。日志**不含 URL query**，避免 token/凭据进日志文件。
+日志每行前缀 `[本地时间] [h3:级别]`（如 `[2026-10-13T14:50:25.679+08:00]`），便于 `docker logs | grep h3:error` 之类过滤。**时间带时区偏移，容器默认东八区**（`TZ=Asia/Shanghai`，见 Dockerfile/compose 与 K8s ConfigMap），想要 UTC 就把 `TZ` 设成 `UTC`。日志**不含 URL query**，避免 token/凭据进日志文件。
 
 **构建时容器内 Node 崩溃 `Assertion failed: uv_thread_create` / `core dumped`（exit 134）**
 旧版 Docker（< 20.10.10，如 20.10.7）的 seccomp 策略会拦 `clone3`，新 glibc 的 Node 一创线程就崩。二选一：
 1. 本仓库已默认用 `node:22-bullseye-slim`（glibc 2.31，不走 `clone3`）——**推荐，无需动宿主机**；
 2. 或在 `docker-compose.yml` 打开 `security_opt: [seccomp:unconfined]`；
 3. 或升级宿主机 Docker 到 ≥ 20.10.10。
+
+**激活邮件发送失败（`535 Error: authentication failed`），注册后账号卡住无法登录？**
+`535` 是**邮件服务器拒绝了账号密码**，不是 H3 Studio 的问题。按序排查：
+1. 密码要用邮箱服务商生成的**客户端授权码**，不是网页登录密码；
+2. 确认 `SMTP_PASS` 已填真实值（K8s 里看 `02-secret.yaml`，别留 `REPLACE_WITH_SMTP_PASSWORD`）；
+3. 看 `SMTP_USER`/`SMTP_FROM` 是否与授权码对应同一个邮箱；
+4. 验证：`curl -s localhost:8787/api/health/detail`（需登录）看 `smtp.ok` 与 `error`；
+5. 账号已建但未激活时，前端注册失败后会显示**「重发激活邮件」**按钮（`POST /api/auth/resend`），修好 SMTP 后自助补发即可，**无需手动改库**。
 
 **邮箱收不到激活邮件**
 1. 先看 `curl -s localhost:8787/api/health` 里 `smtp.ok`；

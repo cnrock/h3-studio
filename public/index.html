@@ -45,8 +45,11 @@
         <input type="email" name="email" autocomplete="username" required placeholder="you@example.com" />
         <label>密码</label>
         <input type="password" name="password" autocomplete="new-password" required minlength="6" placeholder="至少 6 位" />
-        <div class="actions"><button type="submit">注册</button></div>
-        <p class="muted" style="margin-top:12px">注册后需到邮箱点击激活链接才能登录。</p>
+        <div class="actions">
+          <button type="submit">注册</button>
+          <button type="button" class="ghost" id="resendBtn" hidden>重发激活邮件</button>
+        </div>
+        <p class="muted" style="margin-top:12px">注册后需到邮箱点击激活链接才能登录。没收到激活邮件？点「重发激活邮件」。</p>
       </form>
 
       <form id="forgotForm" class="hidden" method="post" action="/api/auth/forgot">

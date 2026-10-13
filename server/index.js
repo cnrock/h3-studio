@@ -7,7 +7,7 @@ import { verifyMailer, sendMail } from './mail.js';
 import { health as h3Health } from './h3.js';
 import {
   checkPassword, createUser, findUserByEmail, findUserById, publicUser,
-  resetPassword, setResetToken, signToken, verifyByToken, authMiddleware,
+  ensureVerifyToken, resetPassword, setResetToken, signToken, verifyByToken, authMiddleware,
 } from './auth.js';
 import { createJob, deleteJob, enqueue, getJob, listJobs, regenerateJob, statsForUser } from './jobs.js';
 import { presetsForClient, normalizeSize, aspectFor, ALIGN } from './resolutions.js';
@@ -112,8 +112,18 @@ function makeLimiter({ windowMs, max, key }) {
   };
 }
 
-const ipOf = (req) =>
-  (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+/**
+ * 客户端真实 IP（用于日志与限速）。
+ * - 优先反代头 x-forwarded-for / x-real-ip；
+ * - 去掉 IPv4 映射前缀 ::ffff:（Node 在 IPv6 套接字上收到 IPv4 会加这个）；
+ * - IPv6 环回 ::1 归一为 127.0.0.1。
+ */
+function ipOf(req) {
+  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const raw = fwd || String(req.headers['x-real-ip'] || '').trim() || req.socket.remoteAddress || 'unknown';
+  const ip = raw.replace(/^::ffff:/i, '');
+  return ip === '::1' ? '127.0.0.1' : ip;
+}
 
 const loginLimiter = makeLimiter({ windowMs: 10 * 60 * 1000, max: 10, key: ipOf });
 const registerLimiter = makeLimiter({ windowMs: 60 * 60 * 1000, max: 5, key: ipOf });
@@ -171,6 +181,29 @@ app.post('/api/auth/register', registerLimiter, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// 重发激活邮件：注册时激活邮件发失败后，用户自己就能补发（此前只能手动改库）。
+// 统一从邮箱出发（不暴露该邮箱是否已注册/是否已激活）。
+app.post('/api/auth/resend', forgotLimiter, async (req, res) => {
+  const email = String((req.body || {}).email || '').trim();
+  const r = email ? ensureVerifyToken(email) : null;
+  if (r) {
+    const link = `${baseUrl(req)}/api/auth/verify?token=${r.token}`;
+    try {
+      await sendMail({
+        to: r.user.email,
+        subject: '【H3 Studio】请激活你的账号',
+        text: `点击链接激活账号：${link}\n\n如果链接无法点击，请复制到浏览器打开。`,
+        html: `<p>欢迎使用 H3 Studio。</p><p>请点击下面的链接激活账号：</p><p><a href="${link}">${link}</a></p><p>若链接无法点击，请复制到浏览器打开。</p>`,
+      });
+      log.info(`重发激活邮件 ${r.user.email}`);
+    } catch (err) {
+      log.warn(`重发激活邮件失败 ${r.user.email}：${err.message}`);
+      return res.status(502).json({ error: `激活邮件发送失败：${err.message}` });
+    }
+  }
+  res.json({ ok: true, message: '如果该邮箱已注册且未激活，激活邮件已重新发送' });
 });
 
 app.get('/api/auth/verify', (req, res) => {
@@ -449,6 +482,7 @@ const server = app.listen(config.port, () => {
   if (config.h3.ref2vaBaseUrl) log.info(`   ref2va 后端: ${config.h3.ref2vaBaseUrl}`);
   log.info(`   邮箱激活: ${config.skipEmailVerification ? '已关闭（注册即可用）' : '已开启'}`);
   log.info(`   日志级别: ${log.level()}（设 LOG_LEVEL=debug 或 H3_DEBUG=1 看逐段细节）`);
+  log.info(`   时区: ${process.env.TZ || '(未设，按容器 UTC)'} 本地时间 ${new Date().toLocaleString()}`);
   log.info(`   时长上限: ${config.limits.maxDurationSec}s 单段硬上限 15s`);
 });
 

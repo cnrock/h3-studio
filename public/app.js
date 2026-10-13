@@ -54,6 +54,8 @@ $('#loginForm').onsubmit = async (e) => {
 $('#registerForm').onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target;
+  const resend = $('#resendBtn');
+  resend.hidden = true;
   try {
     const d = await api('/api/auth/register', {
       method: 'POST',
@@ -62,6 +64,24 @@ $('#registerForm').onsubmit = async (e) => {
     });
     if (d.verified) { state.user = d.user; showApp(); }
     else banner($('#authBanner'), d.message || '注册成功，请到邮箱激活', 'ok');
+  } catch (err) {
+    banner($('#authBanner'), err.message);
+    // 账号已建好但激活邮件没发出去：给用户一个自助重发的入口，别再卡死。
+    resend.hidden = false;
+  }
+};
+
+// 重发激活邮件：注册失败（SMTP 挂了/被拒）后使用，不会重复建号。
+$('#resendBtn').onclick = async () => {
+  const email = $('#registerForm').email.value.trim();
+  if (!email) return banner($('#authBanner'), '请先填写注册邮箱');
+  try {
+    const d = await api('/api/auth/resend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    banner($('#authBanner'), d.message || '激活邮件已重新发送', 'ok');
   } catch (err) { banner($('#authBanner'), err.message); }
 };
 

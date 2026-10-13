@@ -17,7 +17,18 @@ const envLevel = String(process.env.LOG_LEVEL || '').toLowerCase();
 export const LOG_LEVEL_NUM =
   LEVELS[envLevel] ?? (config.debug ? LEVELS.debug : LEVELS.info);
 
-const ts = () => new Date().toISOString();
+/**
+ * 本地时间戳（含时区偏移），如 2026-10-13T14:50:25.679+08:00。
+ * 容器时区由 TZ 决定（镜像默认 Asia/Shanghai）；不带 TZ 时回落到宿主/容器 UTC。
+ */
+const pad = (n, w = 2) => String(n).padStart(w, '0');
+const ts = () => {
+  const d = new Date();
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const abs = Math.abs(off);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+};
 
 function emit(stream, level, tag, args) {
   if (LEVELS[level] < LOG_LEVEL_NUM) return;

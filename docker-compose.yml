@@ -8,6 +8,9 @@ services:
       - "8787:8787"
     env_file:
       - .env
+    environment:
+      # 东八区：日志时间戳按北京时间显示（可被 .env 里的 TZ 覆盖）
+      - TZ=Asia/Shanghai
     volumes:
       # 持久化数据库、上传与生成的视频
       - ./data:/app/data

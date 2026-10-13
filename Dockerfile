@@ -23,6 +23,8 @@ COPY public ./public
 
 ENV NODE_ENV=production
 ENV PORT=8787
+# 时区：Node 自带 ICU 时区库，设 TZ 即可让日志/时间戳按东八区显示，无需装 tzdata。
+ENV TZ=Asia/Shanghai
 EXPOSE 8787
 
 # Persist SQLite DB, uploads and generated videos under /app/data

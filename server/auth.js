@@ -35,6 +35,21 @@ export async function createUser(email, password) {
   return { id: Number(info.lastInsertRowid), verifyToken };
 }
 
+/**
+ * 确保该用户有一个待用的激活 token，返回它。
+ * - 未注册 → null；
+ * - 已激活（verified=1）→ null（无需再发）；
+ * - 失败注册后重发时复用已有 token，避免旧的激活链接失效。
+ */
+export function ensureVerifyToken(email) {
+  const u = findUserByEmail(email);
+  if (!u || u.verified) return null;
+  if (u.verify_token) return { user: u, token: u.verify_token };
+  const token = randomToken();
+  db.prepare('UPDATE users SET verify_token = ? WHERE id = ?').run(token, u.id);
+  return { user: u, token };
+}
+
 export function findUserByEmail(email) {
   return db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
 }
