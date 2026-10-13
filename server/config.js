@@ -49,6 +49,9 @@ export const config = {
   skipEmailVerification: bool(process.env.SKIP_EMAIL_VERIFICATION, false),
   // 详细日志（分段时长/返回视频与音频时长/拼接结果）。设 H3_DEBUG=1 打开。
   debug: bool(process.env.H3_DEBUG, false),
+  // 日志级别（v1.8.3）：debug | info（默认）| warn | error | silent。
+  // 默认 info 即可看到每个请求/每个任务/每段生成；H3_DEBUG=1 等价于 debug。
+  logLevel: String(process.env.LOG_LEVEL || '').toLowerCase() || (bool(process.env.H3_DEBUG, false) ? 'debug' : 'info'),
   // 计费开关：off=不计费（仅统计，默认）；second=按【秒】计费；job=按【条】计费。
   // 显式设 CREDITS_MODE 优先；未设时按费率推断（CREDITS_PER_JOB>0 则 job，CREDITS_PER_SECOND>0 则 second）。
   creditsMode: creditsMode(),

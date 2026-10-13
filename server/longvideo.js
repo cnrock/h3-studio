@@ -412,6 +412,7 @@ export async function generateLongVideo(o) {
 
   if (plans.length <= 1) {
     onProgress({ stage: 'video', current: 1, total: 1 });
+    log.info(`单段生成：${o.width}x${o.height} ${plans[0].duration}s mode=${plans[0].mode}`);
     let prompt = plans[0].prompt;
     if (plans[0].mode === 'fl2va') {
       prompt = injectFl2vaAlignment(prompt, { imageCount: (o.files || []).length, duration: plans[0].duration });
@@ -425,12 +426,13 @@ export async function generateLongVideo(o) {
 
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'h3-long-'));
   const segPaths = [];
+  log.info(`分段生成：共 ${plans.length} 段，计划时长 [${plans.map((p) => p.duration).join(', ')}]s 分镜=${!!storyboard}`);
 
   try {
     for (let i = 0; i < plans.length; i++) {
       const p = plans[i];
       onProgress({ stage: 'segment', current: i + 1, total: plans.length, seconds: p.duration });
-      log.debug(`第 ${i + 1}/${plans.length} 段开始：mode=${i === 0 ? p.mode : 'fl2va?'} 请求时长=${p.duration}s`);
+      log.info(`第 ${i + 1}/${plans.length} 段开始：mode=${i === 0 ? p.mode : 'fl2va?'} 请求时长=${p.duration}s`);
 
       // 逐段重试：只重跑失败的那一段，已成功的段不重做
       let bytes;
@@ -497,7 +499,7 @@ export async function generateLongVideo(o) {
       const vSec = await probeStreamDuration(segPath, 'v:0');
       const aSec = await probeStreamDuration(segPath, 'a:0');
       const sizeMB = (bytes.length / 1048576).toFixed(2);
-      log.debug(`第 ${i + 1}/${plans.length} 段完成：请求=${p.duration}s 返回 video=${vSec ?? '?'}s audio=${aSec ?? '?'}s 大小=${sizeMB}MB`);
+      log.info(`第 ${i + 1}/${plans.length} 段完成：请求=${p.duration}s 返回 video=${vSec ?? '?'}s audio=${aSec ?? '?'}s 大小=${sizeMB}MB`);
       if (p.duration && vSec && Math.abs(vSec - p.duration) > 0.15) {
         log.warn(`第 ${i + 1} 段返回时长与请求不符：请求 ${p.duration}s，实得 video ${vSec}s`);
       }
@@ -505,6 +507,7 @@ export async function generateLongVideo(o) {
     }
 
     onProgress({ stage: 'concat', current: plans.length, total: plans.length });
+    log.info(`开始拼接 ${segPaths.length} 段…`);
     const outPath = path.join(workDir, 'final.mp4');
     await concatSegments(segPaths, outPath);
     // 把成片移出 workDir（workDir 会在 finally 被删），返回路径而非字节，

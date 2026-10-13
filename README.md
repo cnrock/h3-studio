@@ -242,7 +242,8 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 | `MAX_IMAGE_MB` / `MAX_VIDEO_MB` / `MAX_FILES` / `PROMPT_CHARS` | 30/50/9/20000 | 上传与提示词限制 |
 | `MAX_DURATION_SEC` | `1800` | 单次任务允许的总时长（秒）；超 15 秒自动分段 |
 | `MAX_REF_VIDEO_SEC` | `15` | ref2va 参考视频单个时长上限（秒） |
-| `H3_DEBUG` | `false` | `1` 打开逐段时长/音视频对齐详细日志 |
+| `H3_DEBUG` | `false` | `1` 打开逐段时长/音视频对齐详细日志（等价于 `LOG_LEVEL=debug`） |
+| `LOG_LEVEL` | `info` | 日志级别：`debug` / `info`（默认，含每个请求与每个生成任务）/ `warn` / `error` / `silent` |
 | `CREDITS_MODE` | `off` | 计费模式：`off` / `second`（按秒）/ `job`（按条） |
 | `CREDITS_PER_SECOND` | `0` | 按秒费率（点/秒，可小数）；仅 `second` 生效 |
 | `CREDITS_PER_JOB` | `0` | 按条费率（点/条，可小数）；仅 `job` 生效 |
@@ -250,6 +251,18 @@ curl -sS -X POST http://192.0.2.10:8003/v1/videos/sync \
 ---
 
 ## 常见问题
+
+**`docker logs -f h3-studio` 只看到启动那几行，没有请求/任务日志？**
+默认级别就是 `info`，所以正常会有日志；若确实没有，先确认容器是新版（`H3 Studio v1.8.3+`），并在 `.env` 里设 `LOG_LEVEL=info`（或 `debug` 看逐段细节）后 `docker compose up -d` 重建。各级别能看到的内容：
+
+| 级别 | 看得到 |
+|---|---|
+| `info`（默认） | 启动横幅、每个 HTTP 请求（方法/路径/状态/耗时）、注册/登录、任务提交/入队/开始/完成/失败、每段生成进度、拼接进度 |
+| `debug` | 以上 + H3 每次请求的字节数与耗时、每段音视频对齐前后时长、最终成片音视频时长 |
+| `warn` | 仅告警（登录失败、参考视频超长截取、音视频时间戳漂移、分段返回时长不符、某段重试） |
+| `error` | 仅错误（任务失败、请求处理异常） |
+
+日志每行前缀 `[ISO时间] [h3:级别]`，便于 `docker logs | grep h3:error` 之类过滤。日志**不含 URL query**，避免 token/凭据进日志文件。
 
 **构建时容器内 Node 崩溃 `Assertion failed: uv_thread_create` / `core dumped`（exit 134）**
 旧版 Docker（< 20.10.10，如 20.10.7）的 seccomp 策略会拦 `clone3`，新 glibc 的 Node 一创线程就崩。二选一：

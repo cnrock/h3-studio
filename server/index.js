@@ -14,6 +14,7 @@ import { presetsForClient, normalizeSize, aspectFor, ALIGN } from './resolutions
 import { gridInfo, gridDuration } from './frameGrid.js';
 import { planSegments } from './longvideo.js';
 import { ref2vaScaffold, ref2vaTagList, REF2VA_TEMPLATE } from './promptHints.js';
+import { log } from './log.js';
 
 fs.mkdirSync(config.dataDir, { recursive: true });
 const uploadsDir = path.join(config.dataDir, 'uploads');
@@ -62,6 +63,19 @@ app.use((req, _res, next) => {
     const i = part.indexOf('=');
     if (i > 0) req.cookies[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
   }
+  next();
+});
+
+// ---- 请求日志（v1.8.3）----
+// 默认 info 级别就会记录每个请求的「方法 路径 → 状态 耗时」。日志里【不带 query】
+// （避免 token/凭据进日志）；静态资源（/、/*.css、/*.js、favicon）默认跳过，避免刷屏。
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const p = req.path;
+    if (p === '/' || p.endsWith('.css') || p.endsWith('.js') || p.endsWith('.ico') || p.endsWith('.png') || p.endsWith('.webp')) return;
+    log.info(`${req.method} ${p} → ${res.statusCode} ${Date.now() - start}ms ip=${ipOf(req)}`);
+  });
   next();
 });
 
@@ -134,6 +148,7 @@ app.post('/api/auth/register', registerLimiter, async (req, res) => {
 
     const { id, verifyToken } = await createUser(email, password);
     const user = findUserById(id);
+    log.info(`注册新用户 ${user.email}（跳过激活=${config.skipEmailVerification}）`);
 
     if (config.skipEmailVerification) {
       const token = signToken(user);
@@ -171,9 +186,11 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body || {};
   const user = email && findUserByEmail(email);
   if (!user || !(await checkPassword(password || '', user.password_hash))) {
+    log.warn(`登录失败 ${email || '(空)'} ip=${ipOf(req)}`);
     return res.status(401).json({ error: '邮箱或密码错误' });
   }
   if (!user.verified) return res.status(403).json({ error: '账号未激活，请先到邮箱点击激活链接' });
+  log.info(`登录成功 ${user.email}`);
   const token = signToken(user);
   res.cookie(config.cookieName, token, COOKIE_OPTS);
   res.json({ ok: true, token, user: publicUser(user) });
@@ -279,6 +296,11 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
     };
 
     const jobId = createJob(req.user.id, { mode, prompt, params });
+    log.info(
+      `提交任务 ${jobId.slice(0, 8)} user=${req.user.email} mode=${mode} ` +
+      `${size.width}x${size.height} ${segClampedLabel(durClamped)} ` +
+      `时长=${durClamped}s 分段=${segmentCount} 参考文件=${params.files.length + params.jsonRefs.length}`,
+    );
     enqueue(jobId);
     res.json({
       ok: true,
@@ -411,13 +433,23 @@ app.use(express.static(path.join(config.root, 'public'), {
 }));
 
 app.use((err, _req, res, _next) => {
+  log.error('请求处理失败：', err?.message || err);
   res.status(400).json({ error: err.message || '请求失败' });
 });
 
+/** 任务提交日志用：单段显示「单段」，多段显示「N 段」。 */
+function segClampedLabel(totalSec) {
+  const n = planSegments(totalSec).length;
+  return n > 1 ? `${n} 段` : '单段';
+}
+
 const server = app.listen(config.port, () => {
-  console.log(`\n🎬 H3 Studio [${config.deployment}] http://0.0.0.0:${config.port}`);
-  console.log(`   H3 后端: ${config.h3.baseUrl}`);
-  console.log(`   邮箱激活: ${config.skipEmailVerification ? '已关闭（注册即可用）' : '已开启'}\n`);
+  log.info(`🎬 H3 Studio 启动 [${config.deployment}] http://0.0.0.0:${config.port}`);
+  log.info(`   H3 后端: ${config.h3.baseUrl}`);
+  if (config.h3.ref2vaBaseUrl) log.info(`   ref2va 后端: ${config.h3.ref2vaBaseUrl}`);
+  log.info(`   邮箱激活: ${config.skipEmailVerification ? '已关闭（注册即可用）' : '已开启'}`);
+  log.info(`   日志级别: ${log.level()}（设 LOG_LEVEL=debug 或 H3_DEBUG=1 看逐段细节）`);
+  log.info(`   时长上限: ${config.limits.maxDurationSec}s 单段硬上限 15s`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

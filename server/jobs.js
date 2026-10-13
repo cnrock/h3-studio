@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { config } from './config.js';
 import { db, now } from './db.js';
 import { generateLongVideo } from './longvideo.js';
+import { log } from './log.js';
 
 fs.mkdirSync(config.outputsDir, { recursive: true });
 
@@ -60,6 +61,7 @@ export function regenerateJob(id, userId) {
   }
   setStatus(id, 'queued', { error: null, progress: null, started_at: null, finished_at: null, seconds: null, credits: null });
   enqueue(id);
+  log.info(`重新生成 ${id.slice(0, 8)}（原状态 ${row.status}）`);
   return { ok: true };
 }
 
@@ -142,6 +144,7 @@ const queue = [];
 
 export function enqueue(jobId) {
   queue.push(jobId);
+  log.info(`任务入队 ${jobId.slice(0, 8)} 队列长度=${queue.length}`);
   pump();
 }
 
@@ -150,8 +153,12 @@ function pump() {
   const jobId = queue.shift();
   if (!jobId) return;
   running = true;
+  log.info(`开始任务 ${jobId.slice(0, 8)}（同时排队 ${queue.length} 个）`);
   runJob(jobId)
-    .catch((err) => setStatus(jobId, 'error', { error: String(err.message || err), finished_at: now() }))
+    .catch((err) => {
+      log.error(`任务异常 ${jobId.slice(0, 8)}：${err.message || err}`);
+      setStatus(jobId, 'error', { error: String(err.message || err), finished_at: now() });
+    })
     .finally(() => { running = false; pump(); });
 }
 
@@ -161,6 +168,8 @@ async function runJob(jobId) {
   const params = safeJson(row.params_json);
 
   setStatus(jobId, 'running', { error: null, started_at: row.started_at || now() });
+  const t0 = Date.now();
+  log.info(`任务 ${jobId.slice(0, 8)} 开始生成：mode=${row.mode} 提示词 ${row.prompt.length} 字`);
 
   // Rebuild upload files saved by the route (params.files -> {field, filename, path, mimetype})
   const files = [];
@@ -210,6 +219,8 @@ async function runJob(jobId) {
         seconds,
         credits: chargeFor(jobId, row.user_id, seconds),
       });
+      const mb = (fs.statSync(dest).size / 1048576).toFixed(1);
+      log.ok(`任务完成 ${jobId.slice(0, 8)} 成片=${seconds}s 分段=${segments} 大小=${mb}MB 耗时=${((Date.now() - t0) / 1000).toFixed(1)}s`);
       cleanupFiles(params);
       return;
     } catch (err) {
@@ -220,6 +231,7 @@ async function runJob(jobId) {
   // 失败时【不】清理参考文件，以便用户点「重新生成」直接复用；
   // 文件会在删除该任务（deleteJob）时一并清理。
   setStatus(jobId, 'error', { error: String(lastErr?.message || lastErr), finished_at: now() });
+  log.error(`任务失败 ${jobId.slice(0, 8)} 耗时=${((Date.now() - t0) / 1000).toFixed(1)}s：${lastErr?.message || lastErr}`);
 }
 
 /**

@@ -48,6 +48,8 @@ data:
   MAX_DURATION_SEC: "1800"
   # 详细日志（分段时长/音视频时长/拼接结果）。排查长视频音画问题时设为 "1"。
   H3_DEBUG: "0"
+  # 日志级别：debug | info（默认，含每个请求与每个生成任务）| warn | error | silent。
+  LOG_LEVEL: "info"
   # 计费开关："off"=不计费只统计；"second"=按秒计费；"job"=按条计费。
   CREDITS_MODE: "off"
   # 按秒费率（可小数），仅 CREDITS_MODE=second 生效。

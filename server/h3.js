@@ -2,6 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import crypto from 'node:crypto';
 import { config } from './config.js';
+import { log } from './log.js';
 
 /**
  * Build and send a MiniMax H3 (vLLM-Omni) video request.
@@ -80,6 +81,7 @@ function buildMultipart(fields, files) {
  * @returns {Promise<{bytes:Buffer, contentType:string}>}
  */
 export async function generateVideo(o) {
+  const t0 = Date.now();
   const fields = {
     prompt: o.prompt ?? '',
     width: String(o.width),
@@ -146,12 +148,16 @@ export async function generateVideo(o) {
 
   const text = () => buffer.toString('utf8').slice(0, 500);
 
+  const ms = Date.now() - t0;
   if (status < 200 || status >= 300) {
+    log.warn(`H3 请求失败 ${o.mode} ${o.width}x${o.height} ${duration}s → ${status}（${ms}ms）：${text().slice(0, 200)}`);
     throw new Error(`H3 返回 ${status}：${text()}`);
   }
   if (!contentType.includes('video') && !contentType.includes('octet-stream')) {
+    log.warn(`H3 未返回视频 ${o.mode} → content-type=${contentType}（${ms}ms）`);
     throw new Error(`H3 未返回视频（content-type=${contentType}）：${text().slice(0, 300)}`);
   }
+  log.debug(`H3 请求完成 ${o.mode} ${o.width}x${o.height} ${duration}s → ${(buffer.length / 1048576).toFixed(2)}MB（${ms}ms）`);
   return { bytes: buffer, contentType: contentType || 'video/mp4' };
 }
 

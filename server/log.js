@@ -1,14 +1,36 @@
 import { config } from './config.js';
 
 /**
- * 轻量日志。`debug` 级别默认关闭，设 H3_DEBUG=1 打开（docker compose 里加到 .env 即可）。
- * 详细日志用于排查长视频分段拼接：每段的请求时长、返回字节数、返回视频/音频实际时长、
- * 归一化前后时长、拼接后总时长，都会打出来。
+ * 轻量分级日志（v1.8.3）。
+ *
+ * 级别由 `LOG_LEVEL` 控制：debug | info | warn | error | silent（默认 info）。
+ * 默认 info 就已经包含「每个 HTTP 请求 / 每个任务入队-开始-完成-失败 / 每段生成」这些
+ * 关键节点，运维在 `docker logs -f h3-studio` 里无需任何改动就能排查；
+ * 只有更细的逐段秒数细节（音视频对齐、字节数、拼接前后时长）才需要 LOG_LEVEL=debug。
+ *
+ * 兼容旧变量：`H3_DEBUG=1` 等价于 `LOG_LEVEL=debug`。
  */
+const LEVELS = { debug: 10, info: 20, warn: 30, error: 40, silent: 100 };
+
+const envLevel = String(process.env.LOG_LEVEL || '').toLowerCase();
+// 显式 LOG_LEVEL 优先；否则 H3_DEBUG=1 视为 debug，默认为 info。
+export const LOG_LEVEL_NUM =
+  LEVELS[envLevel] ?? (config.debug ? LEVELS.debug : LEVELS.info);
+
 const ts = () => new Date().toISOString();
 
+function emit(stream, level, tag, args) {
+  if (LEVELS[level] < LOG_LEVEL_NUM) return;
+  stream(`[${ts()}] [h3:${tag}]`, ...args);
+}
+
 export const log = {
-  debug: (...a) => { if (config.debug) console.log(`[${ts()}] [h3:debug]`, ...a); },
-  info: (...a) => console.log(`[${ts()}] [h3:info]`, ...a),
-  warn: (...a) => console.warn(`[${ts()}] [h3:warn]`, ...a),
+  /** 当前生效级别名（供启动横幅打印） */
+  level: () => Object.keys(LEVELS).find((k) => LEVELS[k] === LOG_LEVEL_NUM) || 'info',
+  debug: (...a) => emit(console.log, 'debug', 'debug', a),
+  info: (...a) => emit(console.log, 'info', 'info', a),
+  /** 成功节点（info 级别，前缀 [h3:ok] 便于一眼扫到） */
+  ok: (...a) => emit(console.log, 'info', 'ok', a),
+  warn: (...a) => emit(console.warn, 'warn', 'warn', a),
+  error: (...a) => emit(console.error, 'error', 'error', a),
 };
