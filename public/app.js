@@ -503,7 +503,9 @@ const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&a
   {
     const cap = state.limits.maxDurationSec || 1800;
     $('#duration').max = String(cap);
-    $('#durationLabel').textContent = `时长（秒，可超 15 秒自动分段续写，上限 ${cap}）`;
+    // 标签保持单行，否则会把输入框挤到与同行其它字段错位；详细说明放到 hint 与 tooltip
+    $('#durationLabel').textContent = '时长（秒）';
+    $('#duration').title = `可超 15 秒自动分段续写，上限 ${cap} 秒`;
   }
   if (Object.keys(state.aspectPresets).length) renderResolutions();
   // 拉取 R2V 六段式模板（无需登录也能拿到，失败则保留默认文案）

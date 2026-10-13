@@ -125,6 +125,10 @@ button.danger:hover { background: color-mix(in srgb, var(--danger) 10%, transpar
 button.link { background: transparent; border: 0; color: var(--accent); padding: 4px 6px; box-shadow: none; }
 
 .row { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+/* 同一行内各字段高度对齐：标签统一单行高度，避免某个长标签换行把自己的控件挤下去 */
+.row > div { display: flex; flex-direction: column; }
+.row > div > label { min-height: 18px; }
+.row > div > input, .row > div > select { flex: 0 0 auto; }
 .row.narrow { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
 .actions { display: flex; gap: 12px; align-items: center; margin-top: 20px; flex-wrap: wrap; }
 .muted { color: var(--muted); font-size: 13px; letter-spacing: 0; }
