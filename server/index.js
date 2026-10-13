@@ -247,8 +247,11 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
     if (req.body.image_reference) files.push({ field: 'image_reference', filename: 'image_reference', path: null, mimetype: 'application/json', inline: String(req.body.image_reference) });
     if (req.body.video_reference) files.push({ field: 'video_reference', filename: 'video_reference', path: null, mimetype: 'application/json', inline: String(req.body.video_reference) });
 
-    // 时长：先夹到允许区间，再吸附到 H3 合法帧网格（17k+5），避免 H3 静默吸附导致填/得对不上
-    const durClamped = Math.max(4, Math.min(num(req.body.duration, 5), config.limits.maxDurationSec));
+    // 时长：先夹到允许区间（若用户填的超过 maxDurationSec 会被截到上限，需明确回告前端），再吸附到 H3 合法帧网格
+    const rawDuration = num(req.body.duration, 5);
+    const cap = config.limits.maxDurationSec;
+    const durClamped = Math.max(4, Math.min(rawDuration, cap));
+    const durationCapped = rawDuration > cap;
     const snapped = gridDuration(durClamped);
 
     const params = {
@@ -261,7 +264,7 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
       steps: num(req.body.num_inference_steps, 50),
       flowShift: num(req.body.flow_shift, 12),
       seed: req.body.seed === '' || req.body.seed === undefined ? undefined : Number(req.body.seed),
-      // 时长允许 4–1800 秒；超过 15 秒时后端自动分段续写并拼接；每段吸附到合法帧网格
+      // 时长允许 4–maxDurationSec 秒（默认 1800）；超过 15 秒时后端自动分段续写并拼接；每段吸附到合法帧网格
       duration: durClamped,
       requestedDuration: durClamped,
       snappedDuration: snapped.seconds,
@@ -282,6 +285,9 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
         height: size.height,
         aspectRatio: params.aspectRatio,
         duration: durClamped,
+        requestedDuration: rawDuration,
+        maxDurationSec: cap,
+        durationCapped,
         snappedSeconds: snapped.seconds,
         snappedFrames: snapped.frames,
         durationSnapped: Math.abs(snapped.seconds - durClamped) > 0.001,

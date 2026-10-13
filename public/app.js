@@ -8,7 +8,7 @@ const MODE_HINTS = {
   ref2va: '上传参考图片 / 视频片段（可混合，最多 9 个），模型会参考其主体、风格、动作。',
 };
 
-const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15 } };
+const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15, maxDurationSec: 1800 } };
 
 function banner(el, msg, type = 'err') {
   el.textContent = msg;
@@ -137,11 +137,15 @@ function gridDuration(sec) {
   return { seconds: Math.round((frames / fps) * 10000) / 10000, frames };
 }
 function updateDurationHint() {
-  const v = Number($('#duration').value) || 0;
-  if (v < 4) { $('#durationHint').textContent = ''; return; }
+  const cap = state.limits.maxDurationSec || 1800;
+  const raw = Number($('#duration').value) || 0;
+  const v = Math.min(raw, cap);
+  if (v < 4) { $('#durationHint').textContent = raw > cap ? `超过上限 ${cap} 秒，将按 ${cap} 秒生成` : ''; return; }
   const g = gridDuration(v);
   const snapped = Math.abs(g.seconds - v) > 0.001;
-  $('#durationHint').textContent = `实际：${g.frames} 帧 · ${g.seconds.toFixed(2)}s${snapped ? '（自动吸附到 H3 合法帧网格）' : ''}`;
+  const capped = raw > cap;
+  $('#durationHint').textContent = `${capped ? `⚠️ 超过上限 ${cap} 秒，将按 ${cap} 秒生成；` : ''}实际：${g.frames} 帧 · ${g.seconds.toFixed(2)}s${snapped ? '（自动吸附到 H3 合法帧网格）' : ''}`;
+  $('#durationHint').style.color = capped ? 'var(--danger, #c0392b)' : '';
 }
 
 $('#aspect').onchange = renderResolutions;
@@ -272,11 +276,14 @@ $('#generateBtn').onclick = async () => {
   try {
     const res = await api('/api/generate', { method: 'POST', body: fd });
     const adj = res?.adjusted;
-    if (adj && adj.durationSnapped) {
-      banner($('#genBanner'), `任务已提交。时长已吸附到 H3 合法帧网格：${adj.snappedFrames} 帧 · ${adj.snappedSeconds.toFixed(2)}s。生成完成后显示在下方。`, 'ok');
-    } else {
-      banner($('#genBanner'), '任务已提交，生成完成后会显示在下方。', 'ok');
+    const msgs = [];
+    if (adj && adj.durationCapped) {
+      msgs.push(`⚠️ 你填的 ${adj.requestedDuration} 秒超过上限，已按 ${adj.maxDurationSec} 秒生成（如需更长请调大 MAX_DURATION_SEC）`);
     }
+    if (adj && adj.durationSnapped) {
+      msgs.push(`时长已吸附到 H3 合法帧网格：${adj.snappedFrames} 帧 · ${adj.snappedSeconds.toFixed(2)}s`);
+    }
+    banner($('#genBanner'), `任务已提交${msgs.length ? '。' + msgs.join('；') : ''}。生成完成后显示在下方。`, msgs.length ? 'err' : 'ok');
     loadJobs();
   } catch (err) {
     banner($('#genBanner'), err.message);
@@ -389,6 +396,12 @@ const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&a
     if (cfg && cfg.aspectPresets) state.aspectPresets = cfg.aspectPresets;
     if (cfg && cfg.frameGrid) state.frameGrid = { ...state.frameGrid, ...cfg.frameGrid };
   } catch { /* 保留默认值 */ }
+  // 时长上限以服务端为准，避免 UI 填得进去、后端却静默截断
+  {
+    const cap = state.limits.maxDurationSec || 1800;
+    $('#duration').max = String(cap);
+    $('#durationLabel').textContent = `时长（秒，可超 15 秒自动分段续写，上限 ${cap}）`;
+  }
   if (Object.keys(state.aspectPresets).length) renderResolutions();
   // 拉取 R2V 六段式模板（无需登录也能拿到，失败则保留默认文案）
   try {
