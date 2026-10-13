@@ -142,10 +142,28 @@ function updateDurationHint() {
   const v = Math.min(raw, cap);
   if (v < 4) { $('#durationHint').textContent = raw > cap ? `超过上限 ${cap} 秒，将按 ${cap} 秒生成` : ''; return; }
   const g = gridDuration(v);
-  const snapped = Math.abs(g.seconds - v) > 0.001;
   const capped = raw > cap;
-  $('#durationHint').textContent = `${capped ? `⚠️ 超过上限 ${cap} 秒，将按 ${cap} 秒生成；` : ''}实际：${g.frames} 帧 · ${g.seconds.toFixed(2)}s${snapped ? '（自动吸附到 H3 合法帧网格）' : ''}`;
-  $('#durationHint').style.color = capped ? 'var(--danger, #c0392b)' : '';
+  const capNote = `${capped ? `⚠️ 超过上限 ${cap} 秒，将按 ${cap} 秒生成；` : ''}`;
+  if (v > 15) {
+    // 长视频：分段生成，每段各自吸附；行内提示按【分段】说明，别把总时长当成单段 15.08s
+    // 复刻后端 planSegments 的均匀分段（每段 ∈ [4,15]，不丢时长）
+    const n0 = Math.max(1, Math.ceil(v / 15));
+    const base = Math.floor(v / n0);
+    let rem = v - base * n0;
+    const segs = [];
+    for (let i = 0; i < n0; i++) segs.push(base + (rem-- > 0 ? 1 : 0));
+    const gs = segs.map((s) => gridDuration(s));
+    const uniform = gs.every((g) => g.frames === gs[0].frames);
+    const per = uniform
+      ? `${gs[0].frames} 帧 · ${gs[0].seconds.toFixed(2)}s`
+      : gs.slice(0, 3).map((g) => `${g.frames} 帧·${g.seconds.toFixed(1)}s`).join('、') + (gs.length > 3 ? '…' : '');
+    const totalSec = gs.reduce((a, g) => a + g.seconds, 0);
+    $('#durationHint').textContent = `${capNote}将分 ${gs.length} 段生成，每段${uniform ? '' : '约'} ${per}（合计约 ${totalSec.toFixed(0)}s）`;
+    $('#durationHint').style.color = capped ? 'var(--danger, #c0392b)' : '';
+    return;
+  }
+  const snapped = Math.abs(g.seconds - v) > 0.001;
+  $('#durationHint').textContent = `${capNote}实际：${g.frames} 帧 · ${g.seconds.toFixed(2)}s${snapped ? '（自动吸附到 H3 合法帧网格）' : ''}`;
 }
 
 $('#aspect').onchange = renderResolutions;
@@ -280,7 +298,15 @@ $('#generateBtn').onclick = async () => {
     if (adj && adj.durationCapped) {
       msgs.push(`⚠️ 你填的 ${adj.requestedDuration} 秒超过上限，已按 ${adj.maxDurationSec} 秒生成（如需更长请调大 MAX_DURATION_SEC）`);
     }
-    if (adj && adj.durationSnapped) {
+    if (adj && adj.segments > 1) {
+      const fs_ = adj.segmentFrames || [];
+      const secs = adj.segmentSeconds || [];
+      const uniform = fs_.every((v) => v === fs_[0]);
+      const per = uniform
+        ? `${fs_[0]} 帧 · ${secs[0].toFixed(2)}s`
+        : fs_.slice(0, 3).map((v, i) => `${v} 帧·${secs[i].toFixed(1)}s`).join('、') + (fs_.length > 3 ? '…' : '');
+      msgs.push(`将分 ${adj.segments} 段生成，每段${uniform ? '' : '约'} ${per}，合计约 ${(adj.totalDuration || 0).toFixed(0)}s`);
+    } else if (adj && adj.durationSnapped) {
       msgs.push(`时长已吸附到 H3 合法帧网格：${adj.snappedFrames} 帧 · ${adj.snappedSeconds.toFixed(2)}s`);
     }
     banner($('#genBanner'), `任务已提交${msgs.length ? '。' + msgs.join('；') : ''}。生成完成后显示在下方。`, msgs.length ? 'err' : 'ok');
@@ -328,23 +354,25 @@ function renderStats(stats) {
   const mode = stats.creditsMode || 'off';
   const billing = mode === 'second' ? `按秒 ${stats.creditsPerSecond}/秒` : mode === 'job' ? `按条 ${stats.creditsPerJob}/条` : '未开启';
   const showCredits = mode !== 'off';
-  const cell = (label, value, sub = '') =>
-    `<div class="stat"><div class="stat-v">${value}</div><div class="stat-l">${label}${sub ? ` <span class="muted">${sub}</span>` : ''}</div></div>`;
   const t = stats.today || {};
   const a = stats.all || {};
+  // 行式：左标签、右数值；每组自带标题，杜绝「今日/累计」错位
+  const row = (label, value, sub = '') =>
+    `<div class="stat-row"><span class="k">${label}</span><span class="vv"><span class="v">${value}</span>${sub ? ` <span class="sub">${sub}</span>` : ''}</span></div>`;
+  const group = (title, s) => `
+    <div class="stats-group">
+      <div class="stats-group-title">${title}</div>
+      ${row('生成', `${s.done || 0} 条`, s.failed ? `失败 ${s.failed}` : '')}
+      ${row('成片', `${(s.videoSeconds || 0).toFixed(0)} 秒`)}
+      ${row('卡时', `${(s.genMinutes || 0).toFixed(1)} 分`, showCredits && s.credits ? `≈ ${s.credits} 点` : '')}
+      ${row('总耗时', `${(s.totalMinutes || 0).toFixed(1)} 分`, s.waitMinutes ? `含排队 ${s.waitMinutes.toFixed(1)} 分` : '')}
+    </div>`;
   box.innerHTML = `
-    <div class="stats-head">今日 <span class="muted">|</span> 全部</div>
-    <div class="stats-grid">
-      ${cell('今日生成', `${t.done || 0} 条`, t.failed ? `失败 ${t.failed}` : '')}
-      ${cell('今日成片', `${(t.videoSeconds || 0).toFixed(0)} 秒`)}
-      ${cell('今日卡时', `${(t.genMinutes || 0).toFixed(1)} 分`, showCredits ? `≈ ${t.credits || 0} 点` : '')}
-      ${cell('今日总耗时', `${(t.totalMinutes || 0).toFixed(1)} 分`, t.waitMinutes ? `含排队 ${t.waitMinutes.toFixed(1)} 分` : '')}
-      ${cell('累计生成', `${a.done || 0} 条`, a.failed ? `失败 ${a.failed}` : '')}
-      ${cell('累计成片', `${(a.videoSeconds || 0).toFixed(0)} 秒`)}
-      ${cell('累计卡时', `${(a.genMinutes || 0).toFixed(1)} 分`, showCredits ? `≈ ${a.credits || 0} 点` : '')}
-      ${cell('累计总耗时', `${(a.totalMinutes || 0).toFixed(1)} 分`, a.waitMinutes ? `含排队 ${a.waitMinutes.toFixed(1)} 分` : '')}
+    <div class="stats-cols">
+      ${group('今日', t)}
+      ${group('累计', a)}
     </div>
-    <div class="muted" style="font-size:12px;margin-top:8px">卡时 = 真正占用 GPU 的生成时长（不含排队）；总耗时 = 提交到完成。计费：${billing}。</div>`;
+    <div class="stats-note">卡时 = 真正占用 GPU 的生成时长（不含排队）；总耗时 = 提交到完成。计费：${billing}。统计自 v1.8 起启用，更早的作品无时长数据。</div>`;
 }
 
 function jobCard(j) {

@@ -259,9 +259,9 @@ export function statsForUser(userId) {
          SUM(CASE WHEN status='done' THEN 1 ELSE 0 END)   AS done,
          SUM(CASE WHEN status='error' THEN 1 ELSE 0 END)  AS failed,
          SUM(COALESCE(seconds,0))                         AS videoSeconds,
-         SUM(COALESCE(gen_ms,0))                          AS genMs,
-         SUM(COALESCE(wait_ms,0))                         AS waitMs,
-         SUM(COALESCE(total_ms,0))                        AS totalMs,
+         SUM(CASE WHEN status='done' THEN COALESCE(gen_ms,0) ELSE 0 END)   AS genMs,
+         SUM(CASE WHEN status='done' THEN COALESCE(wait_ms,0) ELSE 0 END)  AS waitMs,
+         SUM(CASE WHEN status='done' THEN COALESCE(total_ms,0) ELSE 0 END) AS totalMs,
          SUM(COALESCE(credits,0))                         AS credits
        FROM (
          SELECT status, seconds, credits,

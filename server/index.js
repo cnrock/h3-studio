@@ -12,6 +12,7 @@ import {
 import { createJob, deleteJob, enqueue, getJob, listJobs, regenerateJob, statsForUser } from './jobs.js';
 import { presetsForClient, normalizeSize, aspectFor, ALIGN } from './resolutions.js';
 import { gridInfo, gridDuration } from './frameGrid.js';
+import { planSegments } from './longvideo.js';
 import { ref2vaScaffold, ref2vaTagList, REF2VA_TEMPLATE } from './promptHints.js';
 
 fs.mkdirSync(config.dataDir, { recursive: true });
@@ -253,6 +254,10 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
     const durClamped = Math.max(4, Math.min(rawDuration, cap));
     const durationCapped = rawDuration > cap;
     const snapped = gridDuration(durClamped);
+    // 长视频会分段：提示要按【真实分段】给，而不是把总时长吸附成单段 15.08s。
+    const segSecs = planSegments(durClamped);
+    const segGrid = segSecs.map((s) => gridDuration(s));
+    const segmentCount = segGrid.length;
 
     const params = {
       width: size.width,
@@ -288,9 +293,14 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
         requestedDuration: rawDuration,
         maxDurationSec: cap,
         durationCapped,
+        // 单段：直接给吸附后的帧/秒；多段：给分段数与每段帧/秒（均匀分配，通常各段相同）
+        segments: segmentCount,
+        segmentSeconds: segGrid.map((g) => g.seconds),
+        segmentFrames: segGrid.map((g) => g.frames),
+        totalDuration: segGrid.reduce((a, g) => a + g.seconds, 0),
         snappedSeconds: snapped.seconds,
         snappedFrames: snapped.frames,
-        durationSnapped: Math.abs(snapped.seconds - durClamped) > 0.001,
+        durationSnapped: segmentCount === 1 && Math.abs(snapped.seconds - durClamped) > 0.001,
       },
     });
   } catch (err) {
