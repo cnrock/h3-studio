@@ -37,6 +37,8 @@ export const config = {
   cookieName: 'h3_token',
   // Skip email activation entirely (fastest path; useful for private/LAN use).
   skipEmailVerification: bool(process.env.SKIP_EMAIL_VERIFICATION, false),
+  // 详细日志（分段时长/返回视频与音频时长/拼接结果）。设 H3_DEBUG=1 打开。
+  debug: bool(process.env.H3_DEBUG, false),
 
   // ---- MiniMax H3 backend (vLLM-Omni) ----
   //

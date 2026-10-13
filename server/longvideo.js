@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { generateVideo } from './h3.js';
 import { config } from './config.js';
+import { log } from './log.js';
 import { gridDuration } from './frameGrid.js';
 import { injectFl2vaAlignment } from './promptHints.js';
 
@@ -228,7 +229,7 @@ export async function normalizeReferenceVideos(files) {
       const outDur = (await probeDurationSec(trimmed)) || allowed;
       budget -= Math.min(allowed, outDur);
       out.push({ ...f, buffer: fs.readFileSync(trimmed), filename: `trim-${path.basename(f.filename || 'ref.mp4')}`, mimetype: 'video/mp4' });
-      console.warn(`⚠️ 参考视频「${f.filename}」${dur.toFixed(1)}s 超出上限，已自动截取为 ${outDur.toFixed(1)}s`);
+      log.warn(`⚠️ 参考视频「${f.filename}」${dur.toFixed(1)}s 超出上限，已自动截取为 ${outDur.toFixed(1)}s`);
     }
     return out;
   } finally {
@@ -247,12 +248,32 @@ async function extractLastFrame(mp4Path, outPng) {
   return outPng;
 }
 
+/** 探测某一路流的时长（秒）；失败返回 null */
+async function probeStreamDuration(input, kind = 'v:0') {
+  try {
+    const { stdout } = await execFileP('ffprobe', [
+      '-v', 'error', '-select_streams', kind,
+      '-show_entries', 'stream=duration', '-of', 'default=nw=1:nk=1', input,
+    ]);
+    const d = Number(String(stdout).trim());
+    return Number.isFinite(d) && d > 0 ? d : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 把一段视频归一化：时间戳从 0 开始、固定帧率 CFR、音频重采样到统一采样率。
  * 这是保证拼接后时间轴连续的关键——H3 各段的起始时间戳/帧率/音频延迟并不一致，
  * 直接 `-c copy` 拼接会在段边界留下间隙，浏览器播放到边界即卡住。
+ *
+ * 关键（v1.7.2 修复）：H3 每段返回的**音频轨常常比视频轨长**（AAC 编码器补帧 +
+ * 模型音频尾巴），例如视频 15.0833s 而音频 15.5s。`aresample` 与 `-shortest` 都
+ * **不会**把它截回视频长度，于是每段累积约 0.3~0.6s 的音频溢出，分段拼接后越往后
+ * 音画偏移越大，表现为「重音/回声、后段音画不同步」。这里用显式 `-t <本段视频实际
+ * 时长>` 把每段音视频强制对齐到同一时长，从根上消除累积漂移。
  */
-async function normalizeSegment(input, output, { withAudio }) {
+async function normalizeSegment(input, output, { withAudio, clampSeconds }) {
   const fps = await fpsArgs();
   const args = [
     '-y', '-loglevel', 'error',
@@ -270,6 +291,10 @@ async function normalizeSegment(input, output, { withAudio }) {
   } else {
     args.push('-an');
   }
+  // 音视频对齐：以本段视频实际时长为准，截掉超出的音频尾巴（消除累积漂移）
+  if (withAudio && Number.isFinite(clampSeconds) && clampSeconds > 0) {
+    args.push('-t', clampSeconds.toFixed(4));
+  }
   args.push('-movflags', '+faststart', output);
   await execFileP('ffmpeg', args, { maxBuffer: 1024 * 1024 * 16 });
   return output;
@@ -283,14 +308,23 @@ async function concatSegments(segmentPaths, outPath) {
   for (let i = 0; i < segmentPaths.length; i++) {
     const out = path.join(workDir, `norm-${String(i + 1).padStart(2, '0')}.mp4`);
     let begin = segmentPaths[i];
+    const vIn = await probeStreamDuration(begin, 'v:0');
+    const aIn = await probeStreamDuration(begin, 'a:0');
+    log.debug(`第 ${i + 1} 段原始：video=${vIn ?? '?'}s audio=${aIn ?? '?'}s`);
     try {
-      await normalizeSegment(begin, out, { withAudio: true });
+      await normalizeSegment(begin, out, { withAudio: true, clampSeconds: vIn });
       begin = out;
     } catch (err) {
       // 某段无音轨等异常：仅归一化视频
-      console.warn(`⚠️ 第 ${i + 1} 段音频归一化失败，退回仅视频：${err.message}`);
+      log.warn(`第 ${i + 1} 段音频归一化失败，退回仅视频：${err.message}`);
       await normalizeSegment(begin, out, { withAudio: false });
       begin = out;
+    }
+    const vOut = await probeStreamDuration(begin, 'v:0');
+    const aOut = await probeStreamDuration(begin, 'a:0');
+    log.debug(`第 ${i + 1} 段归一化后：video=${vOut ?? '?'}s audio=${aOut ?? '?'}s`);
+    if (vOut && aOut && Math.abs(vOut - aOut) > 0.06) {
+      log.warn(`第 ${i + 1} 段归一化后音视频仍相差 ${(aOut - vOut).toFixed(3)}s（video ${vOut} / audio ${aOut}）`);
     }
     normalized.push(begin);
   }
@@ -316,6 +350,9 @@ async function concatSegments(segmentPaths, outPath) {
   } finally {
     try { fs.unlinkSync(listFile); } catch {}
   }
+  const vOut = await probeStreamDuration(outPath, 'v:0');
+  const aOut = await probeStreamDuration(outPath, 'a:0');
+  log.debug(`拼接后成片：video=${vOut ?? '?'}s audio=${aOut ?? '?'}s 段数=${segmentPaths.length}`);
   return outPath;
 }
 
@@ -393,6 +430,7 @@ export async function generateLongVideo(o) {
     for (let i = 0; i < plans.length; i++) {
       const p = plans[i];
       onProgress({ stage: 'segment', current: i + 1, total: plans.length, seconds: p.duration });
+      log.debug(`第 ${i + 1}/${plans.length} 段开始：mode=${i === 0 ? p.mode : 'fl2va?'} 请求时长=${p.duration}s`);
 
       // 逐段重试：只重跑失败的那一段，已成功的段不重做
       let bytes;
@@ -412,7 +450,7 @@ export async function generateLongVideo(o) {
                 buffer: fs.readFileSync(lastFrame),
               });
             } catch (err) {
-              console.warn(`⚠️ 第 ${i + 1} 段抽帧失败，退化为纯文本续写：${err.message}`);
+              log.warn(`第 ${i + 1} 段抽帧失败，退化为纯文本续写：${err.message}`);
               usePrev = false;
             }
           } else if (o.files?.length) {
@@ -448,7 +486,7 @@ export async function generateLongVideo(o) {
           break;
         } catch (err) {
           lastErr = err;
-          console.warn(`⚠️ 第 ${i + 1}/${plans.length} 段第 ${attempt} 次失败：${err.message}`);
+          log.warn(`第 ${i + 1}/${plans.length} 段第 ${attempt} 次失败：${err.message}`);
           if (attempt < 2) await new Promise((r) => setTimeout(r, 3000));
         }
       }
@@ -456,6 +494,13 @@ export async function generateLongVideo(o) {
 
       const segPath = path.join(workDir, `seg-${String(i + 1).padStart(2, '0')}.mp4`);
       fs.writeFileSync(segPath, bytes);
+      const vSec = await probeStreamDuration(segPath, 'v:0');
+      const aSec = await probeStreamDuration(segPath, 'a:0');
+      const sizeMB = (bytes.length / 1048576).toFixed(2);
+      log.debug(`第 ${i + 1}/${plans.length} 段完成：请求=${p.duration}s 返回 video=${vSec ?? '?'}s audio=${aSec ?? '?'}s 大小=${sizeMB}MB`);
+      if (p.duration && vSec && Math.abs(vSec - p.duration) > 0.15) {
+        log.warn(`第 ${i + 1} 段返回时长与请求不符：请求 ${p.duration}s，实得 video ${vSec}s`);
+      }
       segPaths.push(segPath);
     }
 

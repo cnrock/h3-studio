@@ -32,7 +32,7 @@ spec:
       # 方式二：把 H3 后端部署在集群内，用 Service 名。
       containers:
         - name: h3-studio
-          image: cnrock/h3-studio:1.7.1
+          image: cnrock/h3-studio:1.7.2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
