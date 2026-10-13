@@ -36,7 +36,7 @@ kubectl -n h3-studio port-forward svc/h3-studio 8787:8787
 ## 3. 镜像
 
 ```
-cnrock/h3-studio:<版本>          # 当前清单默认 1.7.2
+cnrock/h3-studio:<版本>          # 当前清单默认 1.8.0
 ```
 - 官方发布；**多架构**（linux/amd64 + linux/arm64），x86 / ARM 集群均可直接拉取。
 - `latest` 指向最新版本。

@@ -9,7 +9,7 @@ import {
   checkPassword, createUser, findUserByEmail, findUserById, publicUser,
   resetPassword, setResetToken, signToken, verifyByToken, authMiddleware,
 } from './auth.js';
-import { createJob, deleteJob, enqueue, getJob, listJobs, regenerateJob } from './jobs.js';
+import { createJob, deleteJob, enqueue, getJob, listJobs, regenerateJob, statsForUser } from './jobs.js';
 import { presetsForClient, normalizeSize, aspectFor, ALIGN } from './resolutions.js';
 import { gridInfo, gridDuration } from './frameGrid.js';
 import { ref2vaScaffold, ref2vaTagList, REF2VA_TEMPLATE } from './promptHints.js';
@@ -299,6 +299,7 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
 });
 
 app.get('/api/jobs', authMiddleware, (req, res) => res.json({ jobs: listJobs(req.user.id) }));
+app.get('/api/stats', authMiddleware, (req, res) => res.json({ stats: statsForUser(req.user.id) }));
 app.get('/api/jobs/:id', authMiddleware, (req, res) => {
   const job = getJob(req.params.id, req.user.id);
   if (!job) return res.status(404).json({ error: '任务不存在' });
@@ -346,6 +347,7 @@ app.get('/api/config', (_req, res) => {
       maxFiles: config.limits.maxFiles,
       maxDurationSec: config.limits.maxDurationSec,
       maxRefVideoSec: config.limits.maxRefVideoSec,
+      creditsPerSecond: config.creditsPerSecond,
     },
     // 分辨率预设（按画幅比例）、帧网格、对齐粒度 —— 供前端联动与提示
     aspectPresets: presetsForClient(),

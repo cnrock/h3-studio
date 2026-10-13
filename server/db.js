@@ -32,7 +32,11 @@ CREATE TABLE IF NOT EXISTS jobs (
   output_file   TEXT,
   output_bytes  INTEGER,
   error         TEXT,
-  created_at    INTEGER NOT NULL,
+  credits       INTEGER,            -- 本次消耗的点数（config.creditsPerSecond>0 时记录）
+  created_at    INTEGER NOT NULL,   -- 提交时间（入队）
+  started_at    INTEGER,            -- 真正开始生成的时间（排队结束）
+  finished_at   INTEGER,            -- 完成/失败时间
+  seconds       REAL,               -- 成片实际秒数（用于统计，非单段吸附值）
   updated_at    INTEGER NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -43,5 +47,9 @@ CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id, created_at DESC);
 // --- lightweight migrations (add columns if missing) ---
 const jobCols = db.prepare('PRAGMA table_info(jobs)').all().map((c) => c.name);
 if (!jobCols.includes('progress')) db.exec('ALTER TABLE jobs ADD COLUMN progress TEXT');
+if (!jobCols.includes('started_at')) db.exec('ALTER TABLE jobs ADD COLUMN started_at INTEGER');
+if (!jobCols.includes('finished_at')) db.exec('ALTER TABLE jobs ADD COLUMN finished_at INTEGER');
+if (!jobCols.includes('seconds')) db.exec('ALTER TABLE jobs ADD COLUMN seconds REAL');
+if (!jobCols.includes('credits')) db.exec('ALTER TABLE jobs ADD COLUMN credits INTEGER');
 
 export const now = () => Date.now();

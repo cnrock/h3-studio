@@ -8,7 +8,7 @@ const MODE_HINTS = {
   ref2va: '上传参考图片 / 视频片段（可混合，最多 9 个），模型会参考其主体、风格、动作。',
 };
 
-const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15, maxDurationSec: 1800 } };
+const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15, maxDurationSec: 1800, creditsPerSecond: 0 } };
 
 function banner(el, msg, type = 'err') {
   el.textContent = msg;
@@ -304,6 +304,45 @@ async function loadJobs() {
     box.innerHTML = '';
     for (const j of jobs) box.appendChild(jobCard(j));
   } catch { /* ignore transient */ }
+  try {
+    const { stats } = await api('/api/stats');
+    renderStats(stats);
+  } catch { /* ignore transient */ }
+}
+
+/** 把毫秒格式化成人类可读：45.2s / 3.4 分钟 / 1 小时 12 分 */
+function fmtMs(ms) {
+  if (ms === null || ms === undefined) return '—';
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)} 秒`;
+  const m = s / 60;
+  if (m < 60) return `${m.toFixed(1)} 分钟`;
+  const h = Math.floor(m / 60);
+  return `${h} 小时 ${Math.round(m - h * 60)} 分`;
+}
+const fmtClock = (ts) => (ts ? new Date(ts).toLocaleTimeString('zh-CN', { hour12: false }) : '—');
+
+function renderStats(stats) {
+  const box = $('#stats');
+  if (!box || !stats) return;
+  const rate = stats.creditsPerSecond || 0;
+  const cell = (label, value, sub = '') =>
+    `<div class="stat"><div class="stat-v">${value}</div><div class="stat-l">${label}${sub ? ` <span class="muted">${sub}</span>` : ''}</div></div>`;
+  const t = stats.today || {};
+  const a = stats.all || {};
+  box.innerHTML = `
+    <div class="stats-head">今日 <span class="muted">|</span> 全部</div>
+    <div class="stats-grid">
+      ${cell('今日生成', `${t.done || 0} 条`, t.failed ? `失败 ${t.failed}` : '')}
+      ${cell('今日成片', `${(t.videoSeconds || 0).toFixed(0)} 秒`)}
+      ${cell('今日卡时', `${(t.genMinutes || 0).toFixed(1)} 分`, rate ? `≈ ${t.credits || 0} 点` : '')}
+      ${cell('今日总耗时', `${(t.totalMinutes || 0).toFixed(1)} 分`, t.waitMinutes ? `含排队 ${t.waitMinutes.toFixed(1)} 分` : '')}
+      ${cell('累计生成', `${a.done || 0} 条`, a.failed ? `失败 ${a.failed}` : '')}
+      ${cell('累计成片', `${(a.videoSeconds || 0).toFixed(0)} 秒`)}
+      ${cell('累计卡时', `${(a.genMinutes || 0).toFixed(1)} 分`, rate ? `≈ ${a.credits || 0} 点` : '')}
+      ${cell('累计总耗时', `${(a.totalMinutes || 0).toFixed(1)} 分`, a.waitMinutes ? `含排队 ${a.waitMinutes.toFixed(1)} 分` : '')}
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:8px">卡时 = 真正占用 GPU 的生成时长（不含排队）；总耗时 = 提交到完成。</div>`;
 }
 
 function jobCard(j) {
@@ -312,7 +351,7 @@ function jobCard(j) {
   const badge = { queued: '排队中', running: '生成中', done: '已完成', error: '失败' }[j.status] || j.status;
   const queueText =
     j.status === 'queued' && j.queuePosition
-      ? `第 ${j.queuePosition} 位（共 ${j.queueLength} 个排队）`
+      ? `第 ${j.queuePosition} 位（共 ${j.queueLength} 个排队）${j.stats?.etaMs ? ` · 预计等待约 ${fmtMs(j.stats.etaMs)}` : ''}`
       : '';
   const prog = j.progress ? safeParse(j.progress) : null;
   const progText =
@@ -320,6 +359,18 @@ function jobCard(j) {
       ? `分段生成中：第 ${prog.current}/${prog.total} 段${prog.stage === 'concat' ? '（正在拼接）' : ''}`
       : '';
   const pending = queueText || progText || '';
+  // 时序统计：提交时间 / 开始时间 / 完成时间 / 排队等待 / 生成耗时 / 总计
+  const st = j.stats || {};
+  const timing = [];
+  if (st.submittedAt) timing.push(`提交 ${fmtClock(st.submittedAt)}`);
+  if (st.waitMs) timing.push(`排队 ${fmtMs(st.waitMs)}`);
+  if (j.status === 'running' && st.genMs) timing.push(`已生成 ${fmtMs(st.genMs)}`);
+  if (j.status === 'done' || j.status === 'error') {
+    if (st.finishedAt) timing.push(`完成 ${fmtClock(st.finishedAt)}`);
+    if (st.genMs) timing.push(`生成 ${fmtMs(st.genMs)}`);
+    if (st.totalMs) timing.push(`共 ${fmtMs(st.totalMs)}`);
+  }
+  const timingText = timing.length ? timing.join(' · ') : '';
   const media =
     j.status === 'done' && j.videoUrl
       ? `<video src="${j.videoUrl}" controls preload="metadata"></video>`
@@ -332,6 +383,8 @@ function jobCard(j) {
       <span class="badge ${j.status}">${badge}</span>
       <div class="prompt">${escapeHtml(j.prompt)}</div>
       <div class="muted">${j.mode} · ${j.params?.duration || '?'}s${j.bytes ? ' · ' + (j.bytes / 1048576).toFixed(1) + ' MB' : ''}</div>
+      ${timingText ? `<div class="muted" style="font-size:12px">${escapeHtml(timingText)}</div>` : ''}
+      ${st.credits ? `<div class="muted" style="font-size:12px">消耗 ${st.credits} 点</div>` : ''}
       ${j.error ? `<div class="muted" style="color:var(--danger)">${escapeHtml(j.error)}</div>` : ''}
       <div class="actions" style="margin-top:auto">
         ${j.videoUrl ? `<a href="${j.downloadUrl}" download><button class="ghost">下载</button></a>` : ''}
