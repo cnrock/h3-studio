@@ -10,6 +10,9 @@ import {
   resetPassword, setResetToken, signToken, verifyByToken, authMiddleware,
 } from './auth.js';
 import { createJob, deleteJob, enqueue, getJob, listJobs, regenerateJob } from './jobs.js';
+import { presetsForClient, normalizeSize, aspectFor, ALIGN } from './resolutions.js';
+import { gridInfo, gridDuration } from './frameGrid.js';
+import { ref2vaScaffold, ref2vaTagList, REF2VA_TEMPLATE } from './promptHints.js';
 
 fs.mkdirSync(config.dataDir, { recursive: true });
 const uploadsDir = path.join(config.dataDir, 'uploads');
@@ -221,6 +224,10 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
 
     const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
 
+    // 分辨率纠偏：每轴 32 对齐 + 短边≥384；画幅比例以像素为准（避免 9:16+1344×768 这类矛盾组合）
+    const size = normalizeSize(num(req.body.width, 1344), num(req.body.height, 768));
+    if (size.error) return res.status(400).json({ error: size.error });
+
     // H3 的 multipart 参考字段名有严格区分（见 vLLM-Omni helpers.py / 官方测试）：
     //   - ref2va（参考素材，可图可视频混合）→ 复数 input_references
     //   - fl2va 单帧 → 单数 input_reference
@@ -240,16 +247,24 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
     if (req.body.image_reference) files.push({ field: 'image_reference', filename: 'image_reference', path: null, mimetype: 'application/json', inline: String(req.body.image_reference) });
     if (req.body.video_reference) files.push({ field: 'video_reference', filename: 'video_reference', path: null, mimetype: 'application/json', inline: String(req.body.video_reference) });
 
+    // 时长：先夹到允许区间，再吸附到 H3 合法帧网格（17k+5），避免 H3 静默吸附导致填/得对不上
+    const durClamped = Math.max(4, Math.min(num(req.body.duration, 5), config.limits.maxDurationSec));
+    const snapped = gridDuration(durClamped);
+
     const params = {
-      width: num(req.body.width, 1344),
-      height: num(req.body.height, 768),
-      aspectRatio: req.body.aspect_ratio || '16:9',
+      width: size.width,
+      height: size.height,
+      // 画幅比例以实际像素为准（权威）：即使客户端传了矛盾的 aspect_ratio，
+      // 也以对齐后的宽高反推，从根上避免 9:16 + 16:9 像素这类组合
+      aspectRatio: aspectFor(size.width, size.height),
       fps: num(req.body.fps, 24),
       steps: num(req.body.num_inference_steps, 50),
       flowShift: num(req.body.flow_shift, 12),
       seed: req.body.seed === '' || req.body.seed === undefined ? undefined : Number(req.body.seed),
-      // 时长允许 4–120 秒；超过 15 秒时后端自动分段续写并拼接
-      duration: Math.max(4, Math.min(num(req.body.duration, 5), config.limits.maxDurationSec)),
+      // 时长允许 4–1800 秒；超过 15 秒时后端自动分段续写并拼接；每段吸附到合法帧网格
+      duration: durClamped,
+      requestedDuration: durClamped,
+      snappedDuration: snapped.seconds,
       audioFlowShift: num(req.body.audio_flow_shift, 3.0),
       files: files.filter((f) => f.path).map((f) => ({ field: f.field, filename: f.filename, path: f.path, mimetype: f.mimetype })),
       jsonRefs: files.filter((f) => f.inline).map((f) => ({ field: f.field, value: f.inline })),
@@ -257,7 +272,21 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
 
     const jobId = createJob(req.user.id, { mode, prompt, params });
     enqueue(jobId);
-    res.json({ ok: true, jobId });
+    res.json({
+      ok: true,
+      jobId,
+      // 反馈给前端：尺寸/时长若被规整，明确告知（不静默）
+      adjusted: {
+        sizeChanged: size.changed,
+        width: size.width,
+        height: size.height,
+        aspectRatio: params.aspectRatio,
+        duration: durClamped,
+        snappedSeconds: snapped.seconds,
+        snappedFrames: snapped.frames,
+        durationSnapped: Math.abs(snapped.seconds - durClamped) > 0.001,
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -312,7 +341,22 @@ app.get('/api/config', (_req, res) => {
       maxDurationSec: config.limits.maxDurationSec,
       maxRefVideoSec: config.limits.maxRefVideoSec,
     },
+    // 分辨率预设（按画幅比例）、帧网格、对齐粒度 —— 供前端联动与提示
+    aspectPresets: presetsForClient(),
+    frameGrid: gridInfo(),
+    align: ALIGN,
   });
+});
+
+// 公开：R2V 标签清单与六段式模板（非敏感，供前端展示/填充）
+app.get('/api/prompt/ref2va', (req, res) => {
+  // 查询参数 simple：items=image,video,image 之类（逗号分隔的类型序列）
+  const items = String(req.query.items || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((t) => ({ mimetype: t.startsWith('video') ? 'video/mp4' : t.startsWith('audio') ? 'audio/mpeg' : 'image/png' }));
+  res.json({ tags: ref2vaTagList(items), template: REF2VA_TEMPLATE });
 });
 
 // 详情：需登录，含 H3/SMTP 状态（供管理员排查）

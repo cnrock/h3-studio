@@ -408,6 +408,98 @@ H3_REF2VA_API_KEY=          # 若该后端需要鉴权
 
 ---
 
+## 权重文件布局与「两分区两权重」（v1.7 补充）
+
+H3 的 **T2V/I2V（fl2va）分区与 R2V（ref2va）分区权重不通用**，必须各自单独下载、单独起服务进程。
+邮箱里最常见的「t2va 能用、ref2va 报错」多半是把任务发给了只加载 fl2va 权重的后端。
+
+| 用途 | 权重文件 | 目录 |
+|---|---|---|
+| T2V / I2V（fl2va） | `minimax_h3_fl2va_pruned_int8_convrot` | `diffusion_models/` |
+| R2V（ref2va） | `minimax_h3_ref2va_pruned_int8_convrot.safetensors`（**另下，约 19.5 GB**） | `diffusion_models/` |
+| 文本编码器 | `qwen3vl_32b_minimax_h3_nvfp4_awq` | 文本编码器目录 |
+| 视频 VAE + 音频 VAE | 各一个（Load VAE） | vae 目录 |
+
+**两分区两进程的推荐布局**（对应上面的 `H3_BASE_URL` / `H3_BASE_URL_REF2VA`）：
+
+```bash
+# 进程 1：serve FL2VA 分区 -> 承载 t2va / fl2va
+vllm serve <serving-model-path>/FL2VA  --task-type fl2va  --port 8003 ...
+# 进程 2：serve Ref2VA 分区 -> 承载 ref2va
+vllm serve <serving-model-path>/Ref2VA  --task-type ref2va --port 8004 ...
+```
+
+> 注意：单进程「serve 根目录 + 不加 `--task-type`」也可同时支持三任务，但前提是子目录
+> 不含 FastH3 标记文件（见下一节）。无论如何，ref2va 都需要 ref2va 权重在位。
+
+**上线前自检**：登录后访问 `/api/health/detail`，会分别探两个后端并列出各自地址；
+两个后端都 `ok:true` 才说明三模式全通。
+
+---
+
+## 分辨率、画幅与帧数（v1.7）
+
+H3 的硬规则（来自官方部署文档）：
+
+- **原生画布**：短边 768、面积上限 `768×1344`、**每轴对齐 32 的倍数**；Megapixels≈1.0 时
+  16:9 得 `1344×768`，质量最好。低于 384p（短边 < 384）几乎必然失败。
+- **帧数必须落在 `17k+5` 网格**；不合法会被**静默向上吸附**（填 61 帧实际得 73 帧，不报错）。
+  训练区间 `124–362` 帧，24fps 即 **5.17–15.08 秒**；常用合法帧数：124/158/192/245/293/362。
+
+v1.7 的处理：
+
+- **分辨率跟随画幅比例**，每个比例给「预览 / 标准 / 2K（实验性）」三档，全部为 32 的倍数；
+  不再出现「9:16 + 1344×768」这类自相矛盾的组合。2K 远超原生画布，会明显变慢且可能失真，
+  界面已标注为实验性。
+- **时长吸附到帧网格**：服务端把秒数换算成合法帧数再回算秒数（如 5s → 124 帧 → 5.17s），
+  因此 H3 不会再发生静默吸附，你填的和生成的对得上；提交后若发生吸附，界面会明确提示。
+- 服务端另做**尺寸纠偏**：每轴向上取到 32 的倍数，短边 < 384 直接拒绝并说明原因。
+
+---
+
+## 提示词格式指南（v1.7 内置）
+
+H3 官方提示词的三种形态，本站已按模式自动处理或提供模板：
+
+**1) T2V / T2VA：三字段结构**
+
+```
+integrated_multimodal_description: <画面/动作/镜头/光线的完整描述>
+overall_soundscape: <环境音，如雨声、脚步、门铃>
+non_diegetic_music: <配乐，如一段中速木吉他，结尾渐弱>
+```
+
+**2) I2V 家族（fl2va）：正文前多一行「对齐指令」** —— 本站已**自动注入**（首帧→0.00s，
+末帧→该段实际时长，精确两位小数），无需手写。三种官方变体：
+
+```
+# 只给首帧（I2VA）：
+For the target video, at 0.00 seconds into the target video, (from [Shot 1]) is fully referenced.
+# 首尾都给（FL2VA）：
+How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 8.00-second mark of the target video.
+```
+
+**3) R2V（ref2va）：六段式结构**（本站界面提供可填空模板，按上传顺序自动列出 `<Picture N>` 等标签）：
+
+```
+subject_definitions  给每个参考定义标签与特征
+summary              [任务类型] 一句话概括
+retention_analysis   逐标签声明保留程度
+detailed_description 主体，350–500 英文词
+overall_soundscape   环境音
+non_diegetic_music   配乐
+```
+
+四类标签各管各的：`<Subject N>`（要复用的内容）、`<Picture N>`（一张图当某帧/构图锚点）、
+`<Video N>`（整片级关系）、`<Audio N>`（复制/参考的音频）。另外 `ref_image_size` 可选
+`match`（默认，快）/ `max`（角色更保真但慢数倍）。
+
+> 小贴士：本地没有官方的 Context-IR 改写模块，可让任意 LLM 按
+> `https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md`
+> 把你的大白话改写成三字段格式。
+
+---
+
 ## 错误排查：serve 根目录残留 FastH3 标记文件，服务无法启动
 
 **症状**：去掉 `--task-type`、并让 `vllm serve` 指向仓库根目录后，服务起不来，Orchestrator

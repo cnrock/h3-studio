@@ -6,6 +6,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { generateVideo } from './h3.js';
 import { config } from './config.js';
+import { gridDuration } from './frameGrid.js';
+import { injectFl2vaAlignment } from './promptHints.js';
 
 const execFileP = promisify(execFile);
 
@@ -346,7 +348,7 @@ export async function generateLongVideo(o) {
     groups = capped;
     const total = groups.length;
     plans = groups.map((g, i) => {
-      const dur = Math.min(H3_MAX_SECONDS, Math.max(4, Math.round(g.dur)));
+      const dur = Math.min(H3_MAX_SECONDS, gridDuration(g.dur).seconds);
       const shotText = g.shots.map((s) => s.body).join('\n');
       const parts = [];
       if (storyboard.header) parts.push(storyboard.header);
@@ -360,7 +362,7 @@ export async function generateLongVideo(o) {
       return { prompt: parts.join('\n\n'), mode: i === 0 ? o.mode : 'fl2va', duration: dur, usePrevFrame: i > 0 };
     });
   } else {
-    const segs = planSegments(o.duration);
+    const segs = planSegments(o.duration).map((s) => gridDuration(s).seconds);
     const total = segs.length;
     plans = segs.map((dur, i) => {
       const cont =
@@ -373,7 +375,11 @@ export async function generateLongVideo(o) {
 
   if (plans.length <= 1) {
     onProgress({ stage: 'video', current: 1, total: 1 });
-    const { bytes } = await generateVideo({ ...o, prompt: plans[0].prompt, duration: plans[0].duration });
+    let prompt = plans[0].prompt;
+    if (plans[0].mode === 'fl2va') {
+      prompt = injectFl2vaAlignment(prompt, { imageCount: (o.files || []).length, duration: plans[0].duration });
+    }
+    const { bytes } = await generateVideo({ ...o, prompt, duration: plans[0].duration });
     // 写入临时文件后返回路径，避免把整片常驻内存
     const singlePath = path.join(os.tmpdir(), `h3-out-${crypto.randomUUID()}.mp4`);
     fs.writeFileSync(singlePath, bytes);
@@ -420,8 +426,12 @@ export async function generateLongVideo(o) {
           // 早前版本把第 1 段硬编码为 t2va，导致 ref2va/fl2va 的参考文件
           // 被发给 t2va 而报 “t2va does not accept image/video/audio conditions”。
           const segMode = i === 0 ? p.mode : (usePrev ? 'fl2va' : 't2va');
+          // fl2va 必须在正文前注入官方对齐指令（首帧->0.00s，末帧->duration）
+          const segPrompt = segMode === 'fl2va'
+            ? injectFl2vaAlignment(p.prompt, { imageCount: files.filter((f) => /^image\//.test(f.mimetype || '')).length, duration: p.duration })
+            : p.prompt;
           ({ bytes } = await generateVideo({
-            prompt: p.prompt,
+            prompt: segPrompt,
             mode: segMode,
             width: o.width,
             height: o.height,

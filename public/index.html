@@ -82,8 +82,19 @@
         <div class="thumbs" id="thumbs"></div>
       </div>
 
+      <details id="ref2vaPanel" class="hidden" style="margin-top:14px">
+        <summary class="muted" style="cursor:pointer">参考素材标签与模板（R2V 六段式）</summary>
+        <div style="margin-top:10px">
+          <p class="muted" style="margin:0 0 8px">按上传顺序自动编号：第 1 个素材是 Picture 1，第二个是 Video 2……在提示词里用这些标签给每个参考「派活」。</p>
+          <div id="tagList" class="muted" style="font-size:13px;line-height:1.9"></div>
+          <div class="actions" style="margin-top:10px">
+            <button type="button" class="ghost" id="insertTemplateBtn">插入六段式模板</button>
+          </div>
+        </div>
+      </details>
+
       <div class="row" style="margin-top:18px">
-        <div><label>时长（秒，可超 15 秒自动分段续写，上限 1800）</label><input type="number" id="duration" value="5" min="4" max="1800" step="1" /></div>
+        <div><label>时长（秒，可超 15 秒自动分段续写，上限 1800）</label><input type="number" id="duration" value="5" min="4" max="1800" step="1" /><div class="muted" id="durationHint" style="font-size:12px;margin-top:4px"></div></div>
         <div><label>画幅比例</label>
           <select id="aspect">
             <option value="16:9">16:9</option><option value="9:16">9:16</option>
@@ -92,11 +103,8 @@
           </select>
         </div>
         <div><label>分辨率</label>
-          <select id="resolution">
-            <option value="1344x768">768p (1344×768)</option>
-            <option value="2560x1440">2K (2560×1440)</option>
-            <option value="1024x576">576p (1024×576)</option>
-          </select>
+          <select id="resolution"></select>
+          <div class="muted" id="resHint" style="font-size:12px;margin-top:4px"></div>
         </div>
         <div><label>随机种子</label><input type="number" id="seed" placeholder="留空=随机" /></div>
       </div>

@@ -8,7 +8,7 @@ const MODE_HINTS = {
   ref2va: '上传参考图片 / 视频片段（可混合，最多 9 个），模型会参考其主体、风格、动作。',
 };
 
-const state = { user: null, mode: 't2va', files: [], poll: null, limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15 } };
+const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15 } };
 
 function banner(el, msg, type = 'err') {
   el.textContent = msg;
@@ -96,6 +96,71 @@ function showApp() {
   state.poll = setInterval(loadJobs, 4000);
 }
 
+// ---------- resolution <-> aspect ----------
+// H3 按「短边 768、面积上限 768×1344、每轴对齐 32」训练；旧版让比例与分辨率各选各的，
+// 会出现 9:16 + 1344×768 这种自相矛盾的组合。这里让分辨率跟随比例，全部为合法预设。
+function renderResolutions() {
+  const ar = $('#aspect').value;
+  const sel = $('#resolution');
+  const list = state.aspectPresets[ar] || [];
+  sel.innerHTML = list.map((p) => `<option value="${p.value}" data-level="${p.level}">${p.label}</option>`).join('');
+  // 默认选标准档（短边 768 的原生画布，质量最好）
+  const std = list.find((p) => p.level === 'standard') || list[0];
+  if (std) sel.value = std.value;
+  updateResHint();
+}
+function updateResHint() {
+  const opt = $('#resolution').selectedOptions?.[0];
+  const level = opt?.dataset?.level || 'standard';
+  const map = {
+    preview: '快速预览档，试提示词用。',
+    standard: '推荐档：短边 768 原生画布，质量最好。',
+    experimental: '⚠️ 2K 远超原生画布，会明显变慢且可能失真，仅供实验。',
+  };
+  $('#resHint').textContent = map[level] || '';
+  $('#resHint').style.color = level === 'experimental' ? 'var(--danger)' : '';
+}
+
+// ---------- duration <-> frame grid ----------
+// 帧数必须落在 17k+5 网格；否则 H3 会静默向上吸附（填 61 帧得 73 帧，不报错）。
+// 本地预演一遍，让用户提交前就看到实际帧数与秒数。
+const FPS = 24;
+function snapFrames(n) {
+  const { step, offset } = state.frameGrid;
+  const x = Math.max(1, Math.round(n));
+  if ((x - offset) % step === 0) return x;
+  return Math.max(offset + step * Math.max(0, Math.ceil((x - offset) / step)), offset);
+}
+function gridDuration(sec) {
+  const { fps, maxFrames } = state.frameGrid;
+  const frames = Math.min(snapFrames(sec * fps), maxFrames);
+  return { seconds: Math.round((frames / fps) * 10000) / 10000, frames };
+}
+function updateDurationHint() {
+  const v = Number($('#duration').value) || 0;
+  if (v < 4) { $('#durationHint').textContent = ''; return; }
+  const g = gridDuration(v);
+  const snapped = Math.abs(g.seconds - v) > 0.001;
+  $('#durationHint').textContent = `实际：${g.frames} 帧 · ${g.seconds.toFixed(2)}s${snapped ? '（自动吸附到 H3 合法帧网格）' : ''}`;
+}
+
+$('#aspect').onchange = renderResolutions;
+$('#resolution').onchange = updateResHint;
+$('#duration').addEventListener('input', updateDurationHint);
+
+// ---------- ref2va tags ----------
+function updateTags() {
+  const box = $('#tagList');
+  if (!box) return;
+  if (!state.files.length) { box.textContent = '（尚未上传素材）'; return; }
+  box.innerHTML = state.files
+    .map((f, i) => {
+      const t = f.type.startsWith('video') ? 'Video' : f.type.startsWith('audio') ? 'Audio' : 'Picture';
+      return `<div>第 ${i + 1} 个 → <code>&lt;${t} ${i + 1}&gt;</code> ${escapeHtml(f.name)}</div>`;
+    })
+    .join('');
+}
+
 // ---------- mode ----------
 $$('[data-mode]').forEach((btn) => {
   btn.onclick = () => {
@@ -107,6 +172,21 @@ $$('[data-mode]').forEach((btn) => {
     $('#fileLabel').textContent = state.mode === 't2va' ? '参考文件（本模式无需上传）' : (multi ? `参考文件（图片/视频，可多选；单个视频 ≤${state.limits.maxRefVideoSec} 秒）` : '首帧 / 末帧图片（1–2 张）');
     $('#dropZoneWrap').style.opacity = state.mode === 't2va' ? '.5' : '1';
     $('#fileInput').accept = state.mode === 'ref2va' ? 'image/*,video/*' : 'image/*';
+    // ref2va：展开标签/模板面板
+    const panel = $('#ref2vaPanel');
+    if (panel) panel.classList.toggle('hidden', state.mode !== 'ref2va');
+    if (state.mode === 'ref2va') {
+      panel.open = true;
+      const btn = $('#insertTemplateBtn');
+      btn.onclick = () => {
+        const ta = $('#prompt');
+        const cur = ta.value.trim();
+        ta.value = (cur ? cur + '\n\n' : '') + state.ref2vaTemplate;
+        updatePromptCount(ta.value.length);
+        banner($('#genBanner'), '已插入 R2V 六段式模板，按提示替换方括号内容即可。', 'ok');
+      };
+      updateTags();
+    }
     state.files = [];
     renderThumbs();
   };
@@ -142,6 +222,7 @@ function renderThumbs() {
     box.appendChild(el);
   });
   box.querySelectorAll('.x').forEach((b) => (b.onclick = () => { state.files.splice(+b.dataset.i, 1); renderThumbs(); }));
+  if (state.mode === 'ref2va') updateTags();
 }
 
 const updatePromptCount = (len) => {
@@ -189,8 +270,13 @@ $('#generateBtn').onclick = async () => {
   btn.disabled = true;
   $('#genNote').innerHTML = '<span class="spinner"></span> 已提交，生成中（H3 逐个串行处理，请耐心等待）…';
   try {
-    await api('/api/generate', { method: 'POST', body: fd });
-    banner($('#genBanner'), '任务已提交，生成完成后会显示在下方。', 'ok');
+    const res = await api('/api/generate', { method: 'POST', body: fd });
+    const adj = res?.adjusted;
+    if (adj && adj.durationSnapped) {
+      banner($('#genBanner'), `任务已提交。时长已吸附到 H3 合法帧网格：${adj.snappedFrames} 帧 · ${adj.snappedSeconds.toFixed(2)}s。生成完成后显示在下方。`, 'ok');
+    } else {
+      banner($('#genBanner'), '任务已提交，生成完成后会显示在下方。', 'ok');
+    }
     loadJobs();
   } catch (err) {
     banner($('#genBanner'), err.message);
@@ -300,7 +386,16 @@ const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&a
   try {
     const cfg = await api('/api/config');
     if (cfg && cfg.limits) state.limits = { ...state.limits, ...cfg.limits };
+    if (cfg && cfg.aspectPresets) state.aspectPresets = cfg.aspectPresets;
+    if (cfg && cfg.frameGrid) state.frameGrid = { ...state.frameGrid, ...cfg.frameGrid };
   } catch { /* 保留默认值 */ }
+  if (Object.keys(state.aspectPresets).length) renderResolutions();
+  // 拉取 R2V 六段式模板（无需登录也能拿到，失败则保留默认文案）
+  try {
+    const t = await api('/api/prompt/ref2va?items=');
+    if (t && t.template) state.ref2vaTemplate = t.template;
+  } catch { /* 忽略 */ }
   updatePromptCount($('#prompt').value.length);
+  updateDurationHint();
   hint();
 })();
