@@ -1,0 +1,87 @@
+name: Release
+
+# 打 tag（v*）即自动创建 GitHub Release；正文取 CHANGELOG.md 里对应版本的段落。
+#
+# 也可在 Actions 页面手动触发（workflow_dispatch）：
+#   - 填一个 tag  -> 补发该版本的 Release
+#   - 填 all      -> 扫描所有 v* tag，为「还没有 Release」的版本批量补发
+#
+# 说明：本仓库此前没有 CI，Release 一直是「手工创建的」——所以才出现
+# 「tag 推上去了、Release 却没更新」。本工作流把这一步自动化，之后只需 push tag。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'tag（例如 v1.9.2）或 all = 批量补发所有缺失 Release'
+        required: true
+        default: all
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 生成待发布 tag 清单
+        id: tags
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            INPUT="${{ github.event.inputs.tag }}"
+          else
+            INPUT="${GITHUB_REF_NAME}"
+          fi
+          if [ "$INPUT" = "all" ]; then
+            git tag -l 'v*' --sort=-v:refname > /tmp/all.txt
+          else
+            echo "$INPUT" > /tmp/all.txt
+          fi
+          : > /tmp/todo.txt
+          while read -r TAG; do
+            [ -z "$TAG" ] && continue
+            case "$TAG" in v*) ;; *) echo "跳过非 v* tag：$TAG"; continue ;; esac
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "已存在，跳过：$TAG"
+            else
+              echo "$TAG" >> /tmp/todo.txt
+            fi
+          done < /tmp/all.txt
+          echo "待补发：" ; cat /tmp/todo.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: 逐版本创建 Release（正文取 CHANGELOG 段落）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if [ ! -s /tmp/todo.txt ]; then
+            echo "没有需要补发的 Release。"
+            exit 0
+          fi
+          while read -r TAG; do
+            [ -z "$TAG" ] && continue
+            awk -v tag="$TAG" '
+              /^##[ \t]/ {
+                if (grab) exit
+                line=$0; sub(/^##[ \t]+/, "", line)
+                n=split(line, a, /[ \t]/)
+                if (n>0 && a[1]==tag) { grab=1; next }
+              }
+              grab { print }
+            ' CHANGELOG.md > /tmp/notes.md || true
+            if [ ! -s /tmp/notes.md ]; then
+              printf '（CHANGELOG.md 未找到 %s 段落，本次 Release 正文留空）\n' "$TAG" > /tmp/notes.md
+            fi
+            echo "===== 创建 Release $TAG ====="
+            gh release create "$TAG" --title "$TAG 更新" --notes-file /tmp/notes.md
+          done < /tmp/todo.txt
