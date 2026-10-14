@@ -70,7 +70,7 @@ data:
   LLM_TEXT_MODEL: "deepseekv41flash"
   # 识图模型：当前内网模型是纯文本，「描述素材」用不了就留空（按钮自动隐藏）。
   LLM_VISION_MODEL: ""
-  LLM_TIMEOUT_MS: "120000"
+  LLM_TIMEOUT_MS: "300000"
   LLM_MAX_IMAGE_BYTES: "8388608"
 
   # ---- 持久化路径（与 PVC 挂载一致）----

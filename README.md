@@ -256,7 +256,7 @@ curl -sS -X POST http://10.1.10.34:32206/v1/videos/sync \
 | `LLM_API_KEY` | 空 | 提示词助手密钥（可空） |
 | `LLM_TEXT_MODEL` | 空 | 重写用的文本模型 |
 | `LLM_VISION_MODEL` | 空 | 识图模型；空则隐藏「描述素材」 |
-| `LLM_TIMEOUT_MS` | `120000` | 提示词助手单次调用超时 |
+| `LLM_TIMEOUT_MS` | `180000` | 提示词助手单次调用超时 |
 | `LLM_MAX_IMAGE_BYTES` | `8388608` | 描述素材时单张参考图上限 |
 
 ---
@@ -747,7 +747,7 @@ non_diegetic_music   配乐
 | `LLM_API_KEY` | 空 | 端点密钥（可空，如本地 vLLM） |
 | `LLM_TEXT_MODEL` | 空 | 重写用的文本模型（如 `customonrouter/gpt-6-sol`） |
 | `LLM_VISION_MODEL` | 空 | 识图模型（如 `customonrouter/grok-4.7`）。空则隐藏「描述素材」 |
-| `LLM_TIMEOUT_MS` | `120000` | 单次调用超时 |
+| `LLM_TIMEOUT_MS` | `180000` | 单次调用超时 |
 | `LLM_MAX_IMAGE_BYTES` | `8388608` | 单张参考图上限（超限跳过） |
 
 > 未配置时对应按钮自动隐藏（`/api/config` 返回 `assistant:{rewrite,vision}`），不会点了报错。

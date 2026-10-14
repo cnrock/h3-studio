@@ -5,6 +5,22 @@ H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到
 > README 与 CHANGELOG 的章节均使用语义化版本号（`v1.x`），不再出现早期 `v12` 之类旧编号；
 > 修复/排查类章节按真实版本号升序排列。
 
+## v1.9.3
+
+修复「AI 重写」偶发 `This operation was aborted`（HTTP 502，耗时正好 ~120000ms）的问题。
+
+- **根因**：这是**我们自己的超时**把请求掐断了，**不是** vLLM/模型报错。`server/llm.js`
+  对每次 LLM 调用设了 `LLM_TIMEOUT_MS`（默认 120s），到点即 `AbortController.abort()`，
+  fetch 抛出的就是一个光秃秃的 `AbortError`，日志里只留下 `This operation was aborted`。
+  内网推理模型（如 `deepseekv41flash`）遇到长提示词、或冷启动/排队时，单次要跑一两分钟以上，
+  于是被打断。
+- **修复**：
+  - 超时被掐时改抛**可读错误**：`LLM 请求超时（>120000ms）：模型未在时限内返回，可调大 LLM_TIMEOUT_MS`——
+    和模型/网络真报错区分开，一眼能判断。
+  - `LLM_TIMEOUT_MS` 默认由 **120000 → 180000**；K8s ConfigMap 与三个 env 模板设为 **300000**（5 分钟）。
+  - README 端点/超时说明同步更新。
+- **无需重建镜像即可应急**：`LLM_TIMEOUT_MS` 是运行时环境变量，改 ConfigMap / 环境变量重启 Pod 即生效。
+
 ## v1.9.2
 
 修复「AI 重写」无论场景多长都写成 **5.17 秒 / 124 帧**的问题。

@@ -112,7 +112,7 @@ export const config = {
     apiKey: process.env.LLM_API_KEY || '',
     textModel: process.env.LLM_TEXT_MODEL || '',
     visionModel: process.env.LLM_VISION_MODEL || '',
-    timeoutMs: int(process.env.LLM_TIMEOUT_MS, 120000),
+    timeoutMs: int(process.env.LLM_TIMEOUT_MS, 180000),
     // 单次重写/识图请求的图片上限（字节）；超限的参考图会被跳过
     maxImageBytes: int(process.env.LLM_MAX_IMAGE_BYTES, 8 * 1024 * 1024),
   },

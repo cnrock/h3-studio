@@ -45,8 +45,10 @@ export async function llmChat({ messages, model, timeoutMs, temperature = 0.6 })
   const useModel = model || config.llm.textModel;
   if (!useModel) throw new Error('未配置 LLM_TEXT_MODEL');
 
+  const ms = timeoutMs || config.llm.timeoutMs;
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs || config.llm.timeoutMs);
+  let aborted = false;
+  const timer = setTimeout(() => { aborted = true; ctrl.abort(); }, ms);
   try {
     const res = await fetch(`${config.llm.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -71,6 +73,12 @@ export async function llmChat({ messages, model, timeoutMs, temperature = 0.6 })
     const content = data?.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || !content.trim()) throw new Error('LLM 未返回文本内容');
     return { text: content.trim(), model: useModel, usage: data?.usage || null };
+  } catch (e) {
+    // 区分「我们主动掐断（超时）」与「模型/网络真报错」，给出可操作的信息
+    if (aborted || e?.name === 'AbortError') {
+      throw new Error(`LLM 请求超时（>${ms}ms）：模型未在时限内返回，可调大 LLM_TIMEOUT_MS（当前 ${config.llm.timeoutMs}ms）`);
+    }
+    throw e;
   } finally {
     clearTimeout(timer);
   }
