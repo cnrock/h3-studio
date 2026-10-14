@@ -43,10 +43,26 @@ elif git rev-parse --git-dir >/dev/null 2>&1; then
   mapfile -t TAGS < <(git tag -l 'v*' --sort=v:refname)
   echo "使用本地 git tag"
 else
-  mapfile -t TAGS < <(api "$API/tags?per_page=100" \
-    | python3 -c 'import sys,json;[print(t["name"]) for t in json.load(sys.stdin)]' \
-    | grep -E '^v[0-9]' | sort -V)
-  echo "已从 GitHub 拉取 tag 列表"
+  RAW="$(api "$API/tags?per_page=100")" || true
+  if ! TAGLIST="$(printf '%s' "$RAW" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.stderr.write("tag 列表返回的不是 JSON\n"); sys.exit(1)
+if isinstance(d, dict):
+    sys.stderr.write("GitHub API 出错：" + str(d.get("message") or d) + "\n"); sys.exit(1)
+for t in d:
+    print(t["name"])
+')"; then
+    echo "----" >&2
+    echo "无法从 GitHub 获取 tag 列表（见上面的 API 出错信息）。" >&2
+    echo "· 检查 token 是否有效、是否对该仓库有 Contents: Read 权限；" >&2
+    echo "· 或直接点名版本，绕过列表：bash backfill-releases.sh v0.1 v0.2 v0.3 ..." >&2
+    exit 1
+  fi
+  mapfile -t TAGS < <(printf '%s\n' "$TAGLIST" | grep -E '^v[0-9]' | sort -V)
+  echo "已从 GitHub 拉取 tag 列表（共 ${#TAGS[@]} 个）"
 fi
 
 notes_for() {  # $1=tag
