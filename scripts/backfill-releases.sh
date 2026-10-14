@@ -1,27 +1,55 @@
 #!/usr/bin/env bash
 # 为所有「有 tag、但没有 GitHub Release」的版本补建 Release。
-# 正文自动从 CHANGELOG.md 取该版本段落。不需要 GitHub Actions。
+# 正文自动从 CHANGELOG.md 取该版本段落。★不依赖 GitHub Actions★
 #
-# 用法（token 只从环境变量读，不写进任何文件、不进聊天）：
-#   export GITHUB_TOKEN=ghp_xxx        # 需要 Contents: Read and write
-#   bash scripts/backfill-releases.sh            # 只补缺失的（推荐）
-#   bash scripts/backfill-releases.sh v1.9.2 v1.8 # 只补指定版本
-#   DRY_RUN=1 bash scripts/backfill-releases.sh  # 只看会建哪些、正文长啥样，不真建
+# 特点：可以在任何目录直接跑，不需要先 clone 仓库——
+#   · 若当前目录有 CHANGELOG.md / 是 git 仓库，就用本地的；
+#   · 否则自动从 GitHub 拉 tag 列表和 CHANGELOG.md。
+#
+# 用法（token 只从环境变量读，不要写进命令历史以外的文件，也不要贴到聊天里）：
+#   export GITHUB_TOKEN=ghp_xxx          # 需 Contents: Read and write（经典 token 用 repo）
+#   bash backfill-releases.sh            # 补全部缺失的（推荐）
+#   bash backfill-releases.sh v1.9.2     # 只补指定版本（可多个）
+#   DRY_RUN=1 bash backfill-releases.sh  # 只看会建哪些、正文长啥样，不真建
 set -euo pipefail
 
-REPO="cnrock/h3-studio"
+REPO="${REPO:-cnrock/h3-studio}"
+BRANCH="${BRANCH:-main}"
 API="https://api.github.com/repos/$REPO"
-: "${GITHUB_TOKEN:?请先 export GITHUB_TOKEN=... （需 Contents: Read and write）}"
+if [ -z "${GITHUB_TOKEN:-}" ]; then echo "缺少 token：请先 export GITHUB_TOKEN=... （需 Contents: Read and write）" >&2; exit 1; fi
 DRY_RUN="${DRY_RUN:-0}"
 
 command -v curl >/dev/null || { echo "需要 curl"; exit 1; }
-command -v python3 >/dev/null || { echo "需要 python3（仅用于解析 JSON）"; exit 1; }
+command -v python3 >/dev/null || { echo "需要 python3（解析 JSON 用）"; exit 1; }
 
-api() { curl -sS -m 30 -H "Authorization: Bearer $GITHUB_TOKEN" \
+api() { curl -sS -m 30 -H "Authorization: Bearer ***" \
         -H "Accept: application/vnd.github+json" "$@"; }
 
-# 取版本段落：从 "## <tag>" 到下一个 "## " 之前
-notes_for() {
+# ---- 1) 找到 CHANGELOG 内容（本地优先，否则从 GitHub 拉）----
+CL_FILE=""
+if [ -f CHANGELOG.md ]; then
+  CL_FILE="CHANGELOG.md"; echo "使用本地 CHANGELOG.md"
+else
+  CL_FILE="$(mktemp)"
+  curl -fsSL -m 30 "https://raw.githubusercontent.com/$REPO/$BRANCH/CHANGELOG.md" -o "$CL_FILE" \
+    || { echo "拉取 CHANGELOG.md 失败"; exit 1; }
+  echo "已从 GitHub 拉取 CHANGELOG.md"
+fi
+
+# ---- 2) 确定要处理的 tag 列表 ----
+if [ "$#" -gt 0 ]; then
+  TAGS=("$@")
+elif git rev-parse --git-dir >/dev/null 2>&1; then
+  mapfile -t TAGS < <(git tag -l 'v*' --sort=v:refname)
+  echo "使用本地 git tag"
+else
+  mapfile -t TAGS < <(api "$API/tags?per_page=100" \
+    | python3 -c 'import sys,json;[print(t["name"]) for t in json.load(sys.stdin)]' \
+    | grep -E '^v[0-9]' | sort -V)
+  echo "已从 GitHub 拉取 tag 列表"
+fi
+
+notes_for() {  # $1=tag
   awk -v tag="$1" '
     /^##[ \t]/ {
       if (grab) exit
@@ -30,19 +58,14 @@ notes_for() {
       if (n>0 && a[1]==tag) { grab=1; next }
     }
     grab { print }
-  ' CHANGELOG.md
+  ' "$CL_FILE"
 }
-
-if [ "$#" -gt 0 ]; then
-  TAGS=("$@")
-else
-  mapfile -t TAGS < <(git tag -l 'v*' --sort=v:refname)
-fi
 
 created=0; skipped=0; failed=0
 for TAG in "${TAGS[@]}"; do
+  [ -z "$TAG" ] && continue
   code=$(curl -sS -m 20 -o /dev/null -w "%{http_code}" \
-         -H "Authorization: Bearer $GITHUB_TOKEN" "$API/releases/tags/$TAG" || echo 000)
+         -H "Authorization: Bearer ***" "$API/releases/tags/$TAG" || echo 000)
   if [ "$code" = "200" ]; then
     echo "跳过（已有 Release）: $TAG"; skipped=$((skipped+1)); continue
   fi
