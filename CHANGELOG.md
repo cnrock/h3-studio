@@ -5,6 +5,24 @@ H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到
 > README 与 CHANGELOG 的章节均使用语义化版本号（`v1.x`），不再出现早期 `v12` 之类旧编号；
 > 修复/排查类章节按真实版本号升序排列。
 
+## v1.9.5
+
+修复「邮箱或密码错误」——密码明明没错却登不上去（服务端日志显示「登录失败 (空)」）。
+
+- **根因**：前端本意是用 JS 以 `application/json` POST 登录，但服务端只挂了
+  `express.json()`。当浏览器**原生提交表单**时（旧页面被缓存、JS 被拦截/旧内核解析失败、
+  脚本报错），body 是 `application/x-www-form-urlencoded`，`express.json()` 不解析 →
+  `req.body` 为空 → 永远拿不到邮箱/密码 → 恒返回「邮箱或密码错误」，日志记成「登录失败 (空)」。
+  这也是为什么用户看到的是**一坨裸 JSON**（浏览器导航到了 API 响应），而非红色横幅。
+- **修复**（`server/index.js`）：
+  - 追加 `express.urlencoded()`，原生表单提交也能正确取到 `email`/`password`。
+  - 登录接口按 `Accept`/`Content-Type` 区分：JSON 请求仍返回 JSON；原生表单提交则 `303`
+    跳回 `/?auth_error=...`，不再让浏览器直接显示裸 JSON。
+- **修复**（`public/app.js`）：读取 `?auth_error=` 并用横幅提示，随后清掉地址栏参数。
+- **加固**（`server/index.js`）：静态 `js/css` 由默认长缓存改为 `Cache-Control: no-cache`
+  （`app.js` 无版本号，旧脚本被长期缓存会放大「退化成原生提交」的问题）；HTML 仍 `no-store`。
+- 补充登录成功/失败的日志（含 IP），排障时一眼可见「是不是走到原生提交了」。
+
 ## v1.9.4
 
 修复「重启后任务永远卡在生成中」的问题（GPU 其实空闲，用户白等）。

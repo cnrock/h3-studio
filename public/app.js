@@ -591,6 +591,17 @@ const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&a
   } catch {
     $('#authView').classList.remove('hidden');
   }
+  // 若浏览器以原生表单提交登录（JS 被拦截/旧内核），服务端会 303 回 /?auth_error=...，
+  // 这里把错误显示出来，避免用户只看到地址栏多了个参数、不知道发生了什么。
+  {
+    const m = new URLSearchParams(location.search).get('auth_error');
+    if (m) {
+      $('#authView').classList.remove('hidden');
+      $('#appView').classList.add('hidden');
+      banner($('#authBanner'), m);
+      history.replaceState(null, '', location.pathname);
+    }
+  }
   $('#modeHint').textContent = MODE_HINTS.t2va;
   const hint = () => { $('#fileHint').textContent = `图片 ≤${state.limits.maxImageMB}MB，视频 ≤${state.limits.maxVideoMB}MB（参考视频单个 ≤${state.limits.maxRefVideoSec} 秒，超长自动截取）`; };
   hint();

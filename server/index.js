@@ -44,6 +44,11 @@ app.use((_req, res, next) => {
 });
 
 app.use(express.json({ limit: '1mb' }));
+// 兼容浏览器原生表单提交（application/x-www-form-urlencoded / multipart）。
+// 前端本意是 JS 以 JSON POST 提交；但旧版页面缓存、JS 被拦截或脚本报错时，
+// 浏览器会退化成原生表单提交，body 是 urlencoded 而非 JSON。只挂 express.json()
+// 会让 req.body 为空 → 校验拿到空邮箱 → 永远「邮箱或密码错误」(日志显示「登录失败 (空)」)。
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
 // 安全兜底：绝不允许凭据出现在 URL（会进浏览器历史 / Referer / 反代与服务器访问日志）。
 // 前端登录表单已改为 JS POST 提交（并显式 method=post），但若有旧页面缓存 / JS 被拦截 /
@@ -220,15 +225,22 @@ app.get('/api/auth/verify', (req, res) => {
 
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body || {};
+  // 前端本意是 JSON 提交；若浏览器原生提交表单（JS 被拦截/旧内核解析失败/缓存旧页），
+  // 这里也照样处理，只是以 303 跳回首页而不是返回裸 JSON（否则浏览器会显示一坨 JSON）。
+  const wantsJson = req.is('application/json') || (req.get('accept') || '').includes('application/json');
+  const fail = (code, msg) => (wantsJson
+    ? res.status(code).json({ error: msg })
+    : res.redirect(303, `/?auth_error=${encodeURIComponent(msg)}`));
   const user = email && findUserByEmail(email);
   if (!user || !(await checkPassword(password || '', user.password_hash))) {
     log.warn(`登录失败 ${email || '(空)'} ip=${ipOf(req)}`);
-    return res.status(401).json({ error: '邮箱或密码错误' });
+    return fail(401, '邮箱或密码错误');
   }
-  if (!user.verified) return res.status(403).json({ error: '账号未激活，请先到邮箱点击激活链接' });
+  if (!user.verified) return fail(403, '账号未激活，请先到邮箱点击激活链接');
   log.info(`登录成功 ${user.email}`);
   const token = signToken(user);
   res.cookie(config.cookieName, token, COOKIE_OPTS);
+  if (!wantsJson) return res.redirect(303, '/');
   res.json({ ok: true, token, user: publicUser(user) });
 });
 
@@ -551,9 +563,12 @@ app.get('/api/health/detail', authMiddleware, async (_req, res) => {
 });
 
 app.use(express.static(path.join(config.root, 'public'), {
-  // HTML 不缓存：避免浏览器用旧版页面（旧版表单会原生 GET 提交，把密码带进 URL）
+  // HTML 不缓存：避免浏览器用旧版页面（旧版表单会原生 GET 提交，把密码带进 URL）。
+  // JS/CSS 也必须重新校验：app.js 无版本号，若被浏览器长期缓存旧版，
+  // 旧脚本的登录逻辑（或语法在新内核下报错）会导致表单退化成原生提交。
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
+    else if (/\.(js|css)$/.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
   },
 }));
 
