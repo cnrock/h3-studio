@@ -22,7 +22,7 @@ DRY_RUN="${DRY_RUN:-0}"
 command -v curl >/dev/null || { echo "需要 curl"; exit 1; }
 command -v python3 >/dev/null || { echo "需要 python3（解析 JSON 用）"; exit 1; }
 
-api() { curl -sS -m 30 -H "Authorization: Bearer ***" \
+api() { curl -sS -m 30 -H "Authorization: Bearer $GITHUB_TOKEN" \
         -H "Accept: application/vnd.github+json" "$@"; }
 
 # ---- 1) 找到 CHANGELOG 内容（本地优先，否则从 GitHub 拉）----
@@ -81,7 +81,7 @@ created=0; skipped=0; failed=0
 for TAG in "${TAGS[@]}"; do
   [ -z "$TAG" ] && continue
   code=$(curl -sS -m 20 -o /dev/null -w "%{http_code}" \
-         -H "Authorization: Bearer ***" "$API/releases/tags/$TAG" || echo 000)
+         -H "Authorization: Bearer $GITHUB_TOKEN" "$API/releases/tags/$TAG" || echo 000)
   if [ "$code" = "200" ]; then
     echo "跳过（已有 Release）: $TAG"; skipped=$((skipped+1)); continue
   fi
