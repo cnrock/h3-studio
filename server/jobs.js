@@ -51,8 +51,10 @@ export function deleteJob(id, userId) {
 export function regenerateJob(id, userId) {
   const row = db.prepare('SELECT * FROM jobs WHERE id = ? AND user_id = ?').get(id, userId);
   if (!row) return { ok: false, reason: 'not_found' };
+  // 正在排队/生成 -> 默认拒绝；仅当 running 已超时（重启残留 / 请求已死）才允许接管重跑
   if (row.status === 'running' || row.status === 'queued') {
-    return { ok: false, reason: 'busy' };
+    if (!isStale(row)) return { ok: false, reason: 'busy' };
+    log.warn(`接管卡死的任务 ${id.slice(0, 8)}（running 已超时，强制重跑）`);
   }
   const params = safeJson(row.params_json);
   // 参考文件是否仍在
@@ -65,12 +67,19 @@ export function regenerateJob(id, userId) {
   return { ok: true };
 }
 
+/** running 超过「后端请求硬超时 + 宽限」仍未落库 -> 疑似卡死（重启残留 / 请求已死） */
+const runStaleMs = () => (config.h3.timeoutMs || 0) + 5 * 60 * 1000;
+const isStale = (row) =>
+  row.status === 'running' && !!row.started_at && now() - row.started_at > runStaleMs();
+
 function hydrate(row) {
   const queued = row.status === 'queued';
   const created = row.created_at;
   const started = row.started_at || null;
   const finished = row.finished_at || null;
   const endPoint = finished || (row.status === 'running' ? now() : null);
+  // 重启后残留的 running 任务会一直显示「生成中」，这里给出疑似卡死标志
+  const stale = isStale(row);
   const qpos = queued ? Math.max(1, queue.indexOf(row.id) + 1) : null;
   // 排队预估：单 worker 串行，预计等待 ≈ 前面任务数 × 近期平均生成耗时
   const avg = queued || row.status === 'running' ? recentAvgGenMs() : 0;
@@ -105,6 +114,7 @@ function hydrate(row) {
     queueLength: queue.length,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    stale,
     stats,
     videoUrl: row.output_file ? `/api/jobs/${row.id}/video` : null,
     downloadUrl: row.output_file ? `/api/jobs/${row.id}/download` : null,
@@ -135,6 +145,31 @@ function setStatus(id, status, patch = {}) {
   for (const [k, v] of Object.entries(patch)) { cols.push(`${k} = ?`); vals.push(v); }
   vals.push(id);
   db.prepare(`UPDATE jobs SET ${cols.join(', ')} WHERE id = ?`).run(...vals);
+}
+
+/**
+ * 启动自愈（v1.9.4）：worker 队列只存在于进程内存里，重启后不会恢复，
+ * 但数据库里的 status='running'/'queued' 会保留下来——结果就是这些任务在前端
+ * 永远显示「生成中」，而 GPU 其实空闲（用户白等）。
+ * 启动时把这类残留状态收敛为失败，并保留参考文件，让用户点「重新生成」即可重跑。
+ * 返回被收敛的任务数。
+ */
+export function reconcileOnBoot() {
+  const leftover = db
+    .prepare("SELECT id FROM jobs WHERE status IN ('running','queued')")
+    .all();
+  if (!leftover.length) return 0;
+  const t = now();
+  const msg = '服务重启，任务已中断（可点「重新生成」重跑）';
+  const upd = db.prepare(
+    'UPDATE jobs SET status = ?, error = ?, finished_at = ?, updated_at = ? WHERE id = ?',
+  );
+  for (const r of leftover) upd.run('error', msg, t, t, r.id);
+  log.warn(
+    `启动自愈：${leftover.length} 个任务因服务重启被标记为中断（` +
+      `${leftover.map((r) => r.id.slice(0, 8)).join(', ')}）；worker 队列已重建`,
+  );
+  return leftover.length;
 }
 
 // Very small in-process worker: H3 serves one request at a time (max_num_seqs=1),

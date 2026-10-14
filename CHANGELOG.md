@@ -5,6 +5,25 @@ H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到
 > README 与 CHANGELOG 的章节均使用语义化版本号（`v1.x`），不再出现早期 `v12` 之类旧编号；
 > 修复/排查类章节按真实版本号升序排列。
 
+## v1.9.4
+
+修复「重启后任务永远卡在生成中」的问题（GPU 其实空闲，用户白等）。
+
+- **根因**：worker 队列（`queue` / `running`）只存在于进程内存里。重启 h3-studio（或
+  容器/Pod 重建）后队列不会恢复，但数据库里 `status='running'`/`'queued'` 会原样保留——
+  于是这些任务在前端一直显示「生成中」，直到用户手动删掉。
+- **修复**（`server/jobs.js`、`server/index.js`、`public/app.js`）：
+  - **启动自愈 `reconcileOnBoot()`**：进程启动时把残留的 `running`/`queued` 收敛为 `error`，
+    备注「服务重启，任务已中断（可点「重新生成」重跑）」；**保留参考文件**，用户点「重新生成」
+    即可直接重跑，无需重新上传。
+  - **卡死提示**：`hydrate()` 新增 `stale` 字段——`running` 且已超过「`H3_TIMEOUT_MS` + 5 分钟」
+    仍未落库，前端在该卡片上显示黄色提示「看起来已卡住、未在占用 GPU」。
+  - **手动接管重跑**：`regenerateJob()` 之前对 `running`/`queued` 一律返回 `busy`；现在若该任务
+    已 `stale`，则允许从旧进程手里接管重跑（旧请求本就已死，不会真并发）。前端对这些卡片
+    同时显示「重新生成」按钮。
+- 接口：`GET /api/jobs` 返回的每个 job 新增 `stale: boolean` 字段（非破坏性）。
+  k8s 清单镜像 tag 同步升至 `1.9.4`。
+
 ## v1.9.3
 
 修复「AI 重写」偶发 `This operation was aborted`（HTTP 502，耗时正好 ~120000ms）的问题。

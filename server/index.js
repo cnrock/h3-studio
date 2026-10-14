@@ -9,7 +9,7 @@ import {
   checkPassword, createUser, findUserByEmail, findUserById, publicUser,
   ensureVerifyToken, resetPassword, setResetToken, signToken, verifyByToken, authMiddleware,
 } from './auth.js';
-import { createJob, deleteJob, enqueue, getJob, listJobs, regenerateJob, statsForUser } from './jobs.js';
+import { createJob, deleteJob, enqueue, getJob, listJobs, reconcileOnBoot, regenerateJob, statsForUser } from './jobs.js';
 import { presetsForClient, normalizeSize, aspectFor, ALIGN } from './resolutions.js';
 import { gridInfo, gridDuration } from './frameGrid.js';
 import { planSegments } from './longvideo.js';
@@ -570,6 +570,8 @@ function segClampedLabel(totalSec) {
 
 const server = app.listen(config.port, () => {
   log.info(`🎬 H3 Studio 启动 [${config.deployment}] http://0.0.0.0:${config.port}`);
+  // 启动自愈：清掉上次进程残留的 running/queued（否则前端永远显示「生成中」）
+  try { reconcileOnBoot(); } catch (err) { log.error(`启动自愈失败：${err.message || err}`); }
   log.info(`   H3 后端: ${config.h3.baseUrl}`);
   if (config.h3.ref2vaBaseUrl) log.info(`   ref2va 后端: ${config.h3.ref2vaBaseUrl}`);
   log.info(`   邮箱激活: ${config.skipEmailVerification ? '已关闭（注册即可用）' : '已开启'}`);

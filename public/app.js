@@ -504,6 +504,11 @@ function jobCard(j) {
       ? `分段生成中：第 ${prog.current}/${prog.total} 段${prog.stage === 'concat' ? '（正在拼接）' : ''}`
       : '';
   const pending = queueText || progText || '';
+  // 超过了后端请求硬超时仍处于 running：基本可以确定已卡死（不再占用 GPU）
+  const stallHint =
+    j.status === 'running' && j.stale
+      ? '看起来已卡住、未在占用 GPU？点「重新生成」（首次点击会自动修正状态）'
+      : '';
   // 时序统计：提交时间 / 开始时间 / 完成时间 / 排队等待 / 生成耗时 / 总计
   const st = j.stats || {};
   const timing = [];
@@ -530,10 +535,11 @@ function jobCard(j) {
       <div class="muted">${j.mode} · ${j.params?.duration || '?'}s${j.bytes ? ' · ' + (j.bytes / 1048576).toFixed(1) + ' MB' : ''}</div>
       ${timingText ? `<div class="muted" style="font-size:12px">${escapeHtml(timingText)}</div>` : ''}
       ${st.credits ? `<div class="muted" style="font-size:12px">消耗 ${st.credits} 点</div>` : ''}
+      ${stallHint ? `<div class="muted" style="color:var(--warn,#d9a441)">${escapeHtml(stallHint)}</div>` : ''}
       ${j.error ? `<div class="muted" style="color:var(--danger)">${escapeHtml(j.error)}</div>` : ''}
       <div class="actions" style="margin-top:auto">
         ${j.videoUrl ? `<a href="${j.downloadUrl}" download><button class="ghost">下载</button></a>` : ''}
-        ${j.status === 'error' ? `<button class="ghost" data-regen="${j.id}">重新生成</button>` : ''}
+        ${j.status === 'error' || j.status === 'running' ? `<button class="ghost" data-regen="${j.id}">重新生成</button>` : ''}
         <button class="danger" data-del="${j.id}">删除</button>
       </div>
     </div>`;
