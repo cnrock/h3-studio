@@ -236,6 +236,7 @@ async function runJob(jobId) {
         duration: params.duration,
         audioFlowShift: params.audioFlowShift,
         files,
+        turbo: params.turbo,
         onProgress: (p) => setStatus(jobId, 'running', { progress: JSON.stringify(p) }),
       });
       // 成片直接落盘到 outputs（避免整片读进内存）

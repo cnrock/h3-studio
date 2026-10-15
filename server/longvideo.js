@@ -496,7 +496,7 @@ export async function generateLongVideo(o) {
     if (plans[0].mode === 'fl2va') {
       prompt = injectFl2vaAlignment(prompt, { imageCount: (o.files || []).length, duration: plans[0].duration });
     }
-    const { bytes } = await generateVideo({ ...o, prompt, duration: plans[0].duration });
+    const { bytes } = await generateVideo({ ...o, prompt, duration: plans[0].duration, turbo: o.turbo });
     // 写入临时文件后返回路径，避免把整片常驻内存
     const singlePath = path.join(os.tmpdir(), `h3-out-${crypto.randomUUID()}.mp4`);
     fs.writeFileSync(singlePath, bytes);
@@ -562,6 +562,7 @@ export async function generateLongVideo(o) {
             duration: p.duration,
             audioFlowShift: o.audioFlowShift,
             files,
+            turbo: o.turbo,
           }));
           lastErr = null;
           break;

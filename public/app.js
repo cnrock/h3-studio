@@ -8,7 +8,59 @@ const MODE_HINTS = {
   ref2va: '上传参考图片 / 视频片段（可混合，最多 9 个），模型会参考其主体、风格、动作。',
 };
 
-const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15, maxDurationSec: 1800, creditsMode: 'off', creditsPerSecond: 0, creditsPerJob: 0, styleMemoryChars: 2000 } };
+const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15, maxDurationSec: 1800, creditsMode: 'off', creditsPerSecond: 0, creditsPerJob: 0, styleMemoryChars: 2000 }, turbo: false };
+
+// 标准档（短边 768）的 Turbo 参数
+export const TURBO_PARAMS = { steps: 5, flowShift: 6 };
+export const STD_PARAMS = { steps: 50, flowShift: 12 };
+
+// Turbo checkbox handler
+document.addEventListener('DOMContentLoaded', () => {
+  const turboToggle = $('#turboToggle');
+  const turboHint = $('#turboHint');
+  const stepsInput = $('#steps');
+  const flowShiftInput = $('#flowShift');
+  if (!turboToggle) return;
+  turboToggle.addEventListener('change', () => {
+    state.turbo = turboToggle.checked;
+    if (state.turbo) {
+      stepsInput.value = TURBO_PARAMS.steps;
+      flowShiftInput.value = TURBO_PARAMS.flowShift;
+      turboHint.textContent = '仅限 768p（短边 768）标准档；已自动切换 steps=5, flow_shift=6。';        turboHint.style.color = 'var(--accent)';
+      // 禁用/隐藏 experimental 分辨率选项
+      disableExperimentalResolutions();
+    } else {
+      stepsInput.value = STD_PARAMS.steps;
+      flowShiftInput.value = STD_PARAMS.flowShift;
+      turboHint.textContent = '';
+      enableExperimentalResolutions();
+    }
+  });
+});
+
+function disableExperimentalResolutions() {
+  const sel = $('#resolution');
+  for (const opt of sel.options) {
+    if (opt.dataset.level === 'experimental') opt.disabled = true;
+  }
+  // 如果当前选中的是 experimental，强制切回 standard
+  const cur = sel.selectedOptions[0];
+  if (cur?.dataset?.level === 'experimental') {
+    const std = Array.from(sel.options).find(o => o.dataset.level === 'standard');
+    if (std) sel.value = std.value;
+  }
+}
+function enableExperimentalResolutions() {
+  const sel = $('#resolution');
+  for (const opt of sel.options) opt.disabled = false;
+}
+
+// 确保页面加载完成后也执行一次（页面可能已加载）
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  const turboToggle = $('#turboToggle');
+  if (turboToggle) turboToggle.dispatchEvent(new Event('change'));
+}
+
 
 function banner(el, msg, type = 'err') {
   el.textContent = msg;
@@ -425,6 +477,7 @@ function readForm() {
     num_inference_steps: $('#steps').value,
     flow_shift: $('#flowShift').value,
     duration: $('#duration').value,
+    turbo: state.turbo, // Turbo 模式时传递，服务端可加 quality=high
     audio_flow_shift: $('#audioFlowShift').value,
     seed: $('#seed').value,
   };

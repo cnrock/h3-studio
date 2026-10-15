@@ -115,11 +115,14 @@ export async function generateVideo(o) {
 
   // duration is required; H3 accepts 4–15 s per single generation.
   const duration = Math.min(15, Math.max(4, Number(o.duration) || 5));
-  fields.extra_params = extraParams({
+  const extra = {
     task: o.mode,
     duration,
     audio_flow_shift: o.audioFlowShift ?? 3.0,
-  });
+  };
+  // Turbo 模式：加 Cache-DiT quality=high（官方 1.35× 提速，SSIM 0.97）
+  if (o.turbo) extra.quality = 'high';
+  fields.extra_params = extraParams(extra);
 
   const { boundary, body } = buildMultipart(fields, o.files ?? []);
 
