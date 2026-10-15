@@ -10,6 +10,20 @@ import { log } from './log.js';
 // 并把瞬时连接错误重试一次（不重试 4xx/5xx 这类业务错误）。
 const H3_NET_ATTEMPTS = 2;
 
+// v1.11.2：H3 引擎瞬时不可用（Stage-0 无可用副本 / 引擎崩溃后正在重启）的重试。
+// 现象：上一段把引擎跑崩后，后面排队任务会在 0.2s 内秒失败
+// 「Stage-0 has no live replica」；等引擎重启完再点「重新生成」又能成功。
+// 这里对这类【秒级失败】的引擎不可用自动等待重试；若某次尝试已跑很久（说明
+// 是长跑中途引擎崩掉、已消耗大量算力）则不自动重试，交给用户决定，避免重复烧算力。
+const H3_ENGINE_RETRY = Math.max(0, Number(process.env.H3_ENGINE_RETRY ?? 8) || 0);            // 引擎不可用最多等待重试次数
+const H3_ENGINE_RETRY_WAIT_MS = Math.max(1000, Number(process.env.H3_ENGINE_RETRY_WAIT_MS ?? 15000) || 15000); // 每次等待（引擎重启一般 1~2 分钟）
+const H3_ENGINE_FAST_FAIL_MS = Math.max(0, Number(process.env.H3_ENGINE_FAST_FAIL_MS ?? 60000) || 0);  // 仅当该次失败耗时 < 该值才自动重试（秒级失败才重试）
+
+const H3_TRANSIENT_RE = /socket hang up|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|socket disconnected|other side closed/i;
+const H3_ENGINE_DOWN_RE = /EngineCore|inline diffusion engine is dead|has no live replica|no live replica|engine is dead|engine not ready|not ready to serve|worker.*(?:restart|crash)/i;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 /**
  * Build and send a MiniMax H3 (vLLM-Omni) video request.
  *
@@ -160,23 +174,47 @@ export async function generateVideo(o) {
   let status;
   let contentType;
   let buffer;
-  let netErr;
-  for (let attempt = 1; attempt <= H3_NET_ATTEMPTS; attempt++) {
+  let netTries = 0;
+  let engineTries = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const tAttempt = Date.now();
     try {
       ({ status, contentType, buffer } = await doRequest());
-      netErr = null;
-      break;
     } catch (err) {
-      netErr = err;
-      const transient = /socket hang up|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|socket disconnected|other side closed/i.test(
-        String(err.message || err),
-      );
-      log.warn(`H3 连接失败（第 ${attempt}/${H3_NET_ATTEMPTS} 次）：${err.message || err}`);
-      if (!transient || attempt >= H3_NET_ATTEMPTS) break;
-      await new Promise((r) => setTimeout(r, 2000));
+      netTries++;
+      const transient = H3_TRANSIENT_RE.test(String(err.message || err));
+      log.warn(`H3 连接失败（第 ${netTries} 次）：${err.message || err}`);
+      if (!transient || netTries >= H3_NET_ATTEMPTS) throw err;
+      await sleep(2000);
+      continue;
     }
+    if (status >= 200 && status < 300) break;
+
+    const bodyText = buffer.toString('utf8').slice(0, 500);
+    const elapsed = Date.now() - tAttempt;
+    const engineDown = H3_ENGINE_DOWN_RE.test(bodyText);
+    if (engineDown && elapsed < H3_ENGINE_FAST_FAIL_MS && engineTries < H3_ENGINE_RETRY) {
+      engineTries++;
+      const left = H3_ENGINE_RETRY - engineTries;
+      log.warn(
+        `H3 引擎暂不可用（第 ${engineTries}/${H3_ENGINE_RETRY} 次，${elapsed}ms，约 ${Math.round((H3_ENGINE_RETRY_WAIT_MS * (left + 1)) / 1000)}s 内继续尝试）：${bodyText.slice(0, 160)}`,
+      );
+      await sleep(H3_ENGINE_RETRY_WAIT_MS);
+      continue;
+    }
+
+    const ms = Date.now() - t0;
+    log.warn(`H3 请求失败 ${o.mode} ${o.width}x${o.height} ${duration}s → ${status}（${ms}ms）：${bodyText.slice(0, 200)}`);
+    if (engineDown) {
+      // 长跑中途引擎崩掉：已消耗大量算力，不自动重试，给用户可行动的中文提示。
+      throw new Error(
+        `H3 引擎崩溃（Stage-0 无可用副本/engine dead）。这通常是本次生成把推理引擎跑崩（常见于 2K 实验档等超原生画布分辨率），` +
+          `引擎会自动重启，稍等 1~2 分钟后点「重新生成」即可；如反复出现请改用标准档分辨率。原始信息：${bodyText}`,
+      );
+    }
+    throw new Error(`H3 返回 ${status}：${bodyText}`);
   }
-  if (netErr) throw netErr;
 
   const text = () => buffer.toString('utf8').slice(0, 500);
 
