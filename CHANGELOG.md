@@ -5,6 +5,27 @@ H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到
 > README 与 CHANGELOG 的章节均使用语义化版本号（`v1.x`），不再出现早期 `v12` 之类旧编号；
 > 修复/排查类章节按真实版本号升序排列。
 
+## v1.10.0
+
+新增「项目级风格记忆」——写一次、全程遵循的视觉偏好（v2.0 第一步）。
+
+- **背景**：此前 h3-studio 是无状态的单次生成器，每次都要重新复述画风/配色/光影、
+  反复上传同一张参考图。参考创作 Agent 的「项目记忆」形态，引入 per-user 的持久风格偏好。
+- **新增**（`server/db.js`、`server/styleMemory.js`）：`style_memory` 表（`user_id` 主键，
+  `ON DELETE CASCADE`）；`getStyleMemory` / `setStyleMemory` / `withStyleMemory` / `hasStyleMemory`。
+- **新增接口**（`server/index.js`）：`GET /api/style`（读取 + 上限）、`PUT /api/style`
+  （覆盖式写入，超 `STYLE_MEMORY_CHARS`（默认 2000）返回 400）。
+- **注入**：
+  - 生成（`/api/generate`）——提交时以固定前缀 `【全局风格记忆（须全程遵循，不要复述本段文字）】`
+    拼进提示词并落库，长视频分镜/分段路径同样生效。
+  - AI 重写（`/api/prompt/rewrite`）——作为 `style` 参数传入 `rewritePrompt`，织进 system prompt
+    的独立风格区块（常规与分镜两套 system prompt 均支持）。
+  - 注入幂等（已有前缀不重复拼），空风格原样返回。
+- **前端**（`public/index.html`、`public/app.js`）：新增「项目风格记忆」卡片，带保存按钮、
+  实时字数统计与上次保存时间；启动时自动载入。
+- **配置**（`server/config.js`）：新增 `limits.styleMemoryChars`（env `STYLE_MEMORY_CHARS`，默认 2000），
+  经 `/api/config` 下发给前端。
+
 ## v1.9.5
 
 修复「邮箱或密码错误」——密码明明没错却登不上去（服务端日志显示「登录失败 (空)」）。

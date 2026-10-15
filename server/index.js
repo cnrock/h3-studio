@@ -16,6 +16,7 @@ import { planSegments } from './longvideo.js';
 import { ref2vaScaffold, ref2vaTagList, REF2VA_TEMPLATE, tagsFromTypes } from './promptHints.js';
 import { checkPrompt, renderFindings } from './promptCheck.js';
 import { rewritePrompt, captionReferences } from './promptWriter.js';
+import { getStyleMemory, setStyleMemory, withStyleMemory } from './styleMemory.js';
 import { llmChat, llmConfigured, visionConfigured, fileToDataUri } from './llm.js';
 import { log } from './log.js';
 
@@ -287,6 +288,8 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
     const prompt = String(req.body.prompt || '').trim();
     if (!prompt) return res.status(400).json({ error: '请输入提示词' });
     if (prompt.length > config.limits.promptChars) return res.status(400).json({ error: `提示词过长（上限 ${config.limits.promptChars} 字符）` });
+    // 项目级风格记忆：作为固定前缀注入（幂等；空则不变）
+    const styleApplied = withStyleMemory(prompt, getStyleMemory(req.user.id).text);
 
     const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
 
@@ -343,7 +346,7 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
       jsonRefs: files.filter((f) => f.inline).map((f) => ({ field: f.field, value: f.inline })),
     };
 
-    const jobId = createJob(req.user.id, { mode, prompt, params });
+    const jobId = createJob(req.user.id, { mode, prompt: styleApplied, params });
     log.info(
       `提交任务 ${jobId.slice(0, 8)} user=${req.user.email} mode=${mode} ` +
       `${size.width}x${size.height} ${segClampedLabel(durClamped)} ` +
@@ -430,6 +433,7 @@ app.get('/api/config', (_req, res) => {
       creditsMode: config.creditsMode,
       creditsPerSecond: config.creditsPerSecond,
       creditsPerJob: config.creditsPerJob,
+      styleMemoryChars: config.limits.styleMemoryChars,
     },
     // 分辨率预设（按画幅比例）、帧网格、对齐粒度 —— 供前端联动与提示
     aspectPresets: presetsForClient(),
@@ -438,6 +442,23 @@ app.get('/api/config', (_req, res) => {
     // 提示词 AI 助手可用性（不泄露端点/密钥）
     assistant: { rewrite: llmConfigured(), vision: visionConfigured() },
   });
+});
+
+// ---------- 项目级风格记忆（v2.0）----------
+// 一次性写下贯穿始终的视觉偏好，生成/重写时自动遵循。per-user 存储。
+app.get('/api/style', authMiddleware, (req, res) => {
+  const { text, updatedAt } = getStyleMemory(req.user.id);
+  res.json({ style: text, updatedAt, limit: config.limits.styleMemoryChars });
+});
+
+app.put('/api/style', authMiddleware, (req, res) => {
+  const text = String(req.body?.style ?? '');
+  if (text.length > config.limits.styleMemoryChars) {
+    return res.status(400).json({ error: `风格记忆过长（上限 ${config.limits.styleMemoryChars} 字符）` });
+  }
+  const out = setStyleMemory(req.user.id, text);
+  log.info(`风格记忆更新 user=${req.user.email} ${out.text.length} 字`);
+  res.json({ ok: true, style: out.text, updatedAt: out.updatedAt });
 });
 
 // ---------- prompt assistant (v1.9) ----------
@@ -477,8 +498,9 @@ app.post('/api/prompt/rewrite', authMiddleware, async (req, res) => {
   const mode = PROMPT_MODES.has(String(req.body.mode)) ? String(req.body.mode) : 't2va';
   const duration = Math.max(4, Math.min(Number(req.body.duration) || 5, config.limits.maxDurationSec));
   const refs = refsFromBody(req.body);
+  const style = getStyleMemory(req.user.id).text;
   try {
-    const out = await rewritePrompt({ prompt, mode, duration, refs, chat: llmChat });
+    const out = await rewritePrompt({ prompt, mode, duration, refs, style, chat: llmChat });
     // 自检目标时长：分镜脚本按总时长；其它模式按实际生成时长（超上限时已收敛到 15s）
     const checkDuration = out.storyboard ? duration : (out.duration ? out.duration.seconds : duration);
     const check = checkPrompt({ prompt: out.text, mode, duration: checkDuration, files: refs.map((r) => ({ mimetype: r.mimetype, filename: r.tag })) });

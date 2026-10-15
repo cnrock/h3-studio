@@ -63,6 +63,16 @@
   <!-- ============ APP ============ -->
   <section id="appView" class="hidden">
     <div class="card">
+      <h2>项目风格记忆 <button class="ghost" id="styleSaveBtn" style="float:right;padding:7px 14px;font-size:13px">保存</button></h2>
+      <p class="muted" style="margin:0 0 10px">写一次、全程遵循：画风、配色、光影、人物/产品外观与禁忌项。生成与 AI 重写都会自动带上，无需每次复述。</p>
+      <textarea id="styleMemory" placeholder="例：简洁克制的真实商业摄影质感；产品用柔和有层次的光影，人物自然，避免夸张科技特效与过度磨皮；全程沿用已确认的产品外观与品牌配色。"></textarea>
+      <div class="actions" style="margin-top:8px">
+        <span class="muted" id="styleCount" style="font-size:12px"></span>
+        <span class="muted" id="styleNote" style="font-size:12px"></span>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>生成视频</h2>
       <div id="genBanner" class="banner"></div>
 

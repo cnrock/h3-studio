@@ -47,16 +47,19 @@ const fmtClock = (sec) => {
 };
 
 /** 构造重写用的 system prompt */
-function buildRewriteSystem({ mode, duration, durationNote, refs = [] }) {
+function buildRewriteSystem({ mode, duration, durationNote, refs = [], style = '' }) {
   const guide = MODE_GUIDE[mode] || MODE_GUIDE.t2va;
   const refLine = refs.length
     ? `\n可用的参考素材标签（必须全部被引用）：${refs.map((r) => `${r.tag}（${r.type}）`).join('、')}`
+    : '';
+  const styleBlock = String(style || '').trim()
+    ? `\n\n【项目级风格记忆（必须全程遵循；自然地织进各字段，不要单列复述）】\n${String(style).trim()}`
     : '';
   return `你是 MiniMax H3 音视频生成模型的分镜师与提示词工程师。H3 的文本编码器没有生成能力，
 只能把文字压成特征向量；因此提示词必须严格解耦成独立字段，否则三类特征会在隐空间互相干涉，
 导致镜头乱切、音画打架。
 
-${guide}${refLine}
+${guide}${refLine}${styleBlock}
 
 硬性约束：
 - 目标时长 ${duration} 秒（已吸附到 H3 合法帧网格：${durationNote}）。所有镜头切点时间戳必须落在该时长内，且严格递增。
@@ -71,7 +74,7 @@ ${guide}${refLine}
  * 该格式由 longvideo.js 的 parseStoryboard 解析：按 ≤15 秒把相邻镜头聚成生成段，
  * 每段只喂自己的剧本，因此总时长不再受单段 15 秒限制。
  */
-function buildStoryboardSystem({ duration, refs = [] }) {
+function buildStoryboardSystem({ duration, refs = [], style = '' }) {
   const totalSec = Math.max(H3_MAX_SECONDS + 1, Math.round(Number(duration) || 0));
   const segGrid = planSegments(totalSec).map((s) => gridDuration(s));
   // 段边界严格按「每段吸附后的真实秒数」累加——与后端逐段生成的实际时间轴一致。
@@ -83,6 +86,9 @@ function buildStoryboardSystem({ duration, refs = [] }) {
   );
   const refLine = refs.length
     ? `\n- 参考素材标签（若引用须逐一点名并与上传顺序一致）：${refs.map((r) => `${r.tag}（${r.type}）`).join('、')}`
+    : '';
+  const styleBlock = String(style || '').trim()
+    ? `\n- 【项目级风格记忆（必须全程遵循）】${String(style).trim()}`
     : '';
   return `你是 MiniMax H3 音视频生成模型的分镜师与提示词工程师。H3 的文本编码器没有生成能力，只把文字压成特征向量；
 提示词必须严格解耦成独立字段，否则镜头/环境音/配乐三类特征会在隐空间互相干涉，导致镜头乱切、音画打架。
@@ -110,7 +116,7 @@ function buildStoryboardSystem({ duration, refs = [] }) {
 
 【分段计划（服务端会依时间轴自动分段；请让每段累计时长贴近下列区间，任何一段都不得超过 ${H3_MAX_SECONDS} 秒）】
 共 ${segGrid.length} 段：
-${planLines.join('\n')}${refLine}
+${planLines.join('\n')}${refLine}${styleBlock}
 
 硬性约束：
 - 只输出分镜脚本正文，不要任何解释、前言或 Markdown 代码块。
@@ -140,9 +146,10 @@ function buildUserMessage(prompt) {
  * @param {string} o.mode
  * @param {number} o.duration   目标总时长（秒，未吸附的用户值）
  * @param {Array<{tag:string,type:string}>} [o.refs]
+ * @param {string} [o.style]  项目级风格记忆（作为全局约束织入）
  * @param {(args:object)=>Promise<{text:string}>} o.chat  注入的 LLM 调用（便于测试）
  */
-export async function rewritePrompt({ prompt, mode = 't2va', duration = 5, refs = [], chat }) {
+export async function rewritePrompt({ prompt, mode = 't2va', duration = 5, refs = [], style = '', chat }) {
   const requested = Math.max(4, Number(duration) || 0);
   const totalGrid = gridDuration(requested);
   // 是否需要分段：沿用与生成路径同一套 planSegments 判定（>15s 才会 >1 段）
@@ -151,7 +158,7 @@ export async function rewritePrompt({ prompt, mode = 't2va', duration = 5, refs 
   // —— 长时长：T2VA -> 分镜脚本；其它模式 -> 单段 15s + 明确告知 ——
   if (needsLong && mode === 't2va') {
     const messages = [
-      { role: 'system', content: buildStoryboardSystem({ duration: requested, refs }) },
+      { role: 'system', content: buildStoryboardSystem({ duration: requested, refs, style }) },
       { role: 'user', content: buildUserMessage(String(prompt || '').trim()) },
     ];
     const { text, model, usage } = await chat({ messages, temperature: 0.5 });
@@ -167,7 +174,7 @@ export async function rewritePrompt({ prompt, mode = 't2va', duration = 5, refs 
   if (needsLong) {
     const g = gridDuration(H3_MAX_SECONDS);
     const messages = [
-      { role: 'system', content: buildRewriteSystem({ mode, duration: g.seconds.toFixed(2), durationNote: `${g.frames} 帧 · ${g.seconds.toFixed(2)}s`, refs }) },
+      { role: 'system', content: buildRewriteSystem({ mode, duration: g.seconds.toFixed(2), durationNote: `${g.frames} 帧 · ${g.seconds.toFixed(2)}s`, refs, style }) },
       { role: 'user', content: buildUserMessage(String(prompt || '').trim()) },
     ];
     const { text, model, usage } = await chat({ messages, temperature: 0.5 });
@@ -177,7 +184,7 @@ export async function rewritePrompt({ prompt, mode = 't2va', duration = 5, refs 
   // —— 单段：常规重写 ——
   const durationNote = `${totalGrid.frames} 帧 · ${totalGrid.seconds.toFixed(2)}s`;
   const messages = [
-    { role: 'system', content: buildRewriteSystem({ mode, duration: totalGrid.seconds.toFixed(2), durationNote, refs }) },
+    { role: 'system', content: buildRewriteSystem({ mode, duration: totalGrid.seconds.toFixed(2), durationNote, refs, style }) },
     { role: 'user', content: buildUserMessage(String(prompt || '').trim()) },
   ];
   const { text, model, usage } = await chat({ messages, temperature: 0.6 });

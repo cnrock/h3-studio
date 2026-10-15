@@ -42,6 +42,14 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id, created_at DESC);
+
+-- 项目级风格记忆（v2.0）：每个用户一份贯穿始终的视觉偏好，生成/重写时自动注入。
+CREATE TABLE IF NOT EXISTS style_memory (
+  user_id    INTEGER PRIMARY KEY,
+  text       TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 `);
 
 // --- lightweight migrations (add columns if missing) ---

@@ -48,6 +48,8 @@ data:
   MAX_VIDEO_MB: "50"
   MAX_FILES: "9"
   PROMPT_CHARS: "20000"
+  # 项目级风格记忆字符上限（v1.10）。
+  STYLE_MEMORY_CHARS: "2000"
   MAX_DURATION_SEC: "1800"
   # 详细日志（分段时长/音视频时长/拼接结果）。排查长视频音画问题时设为 "1"。
   H3_DEBUG: "0"

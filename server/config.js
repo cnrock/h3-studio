@@ -88,6 +88,8 @@ export const config = {
     // 单次任务允许的总时长（秒）。H3 单段上限 15 秒，超出部分自动分段续写。
     // 默认 1800（30 分钟）；调大需同步关注磁盘与生成耗时。
     maxDurationSec: int(process.env.MAX_DURATION_SEC, 1800),
+    // 项目级风格记忆的字符上限（v2.0）。生成/重写时作为固定前缀注入提示词。
+    styleMemoryChars: int(process.env.STYLE_MEMORY_CHARS, 2000),
   },
 
   smtp: {

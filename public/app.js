@@ -8,7 +8,7 @@ const MODE_HINTS = {
   ref2va: '上传参考图片 / 视频片段（可混合，最多 9 个），模型会参考其主体、风格、动作。',
 };
 
-const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15, maxDurationSec: 1800, creditsMode: 'off', creditsPerSecond: 0, creditsPerJob: 0 } };
+const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15, maxDurationSec: 1800, creditsMode: 'off', creditsPerSecond: 0, creditsPerJob: 0, styleMemoryChars: 2000 } };
 
 function banner(el, msg, type = 'err') {
   el.textContent = msg;
@@ -367,6 +367,50 @@ $('#captionBtn').onclick = async () => {
   }
 };
 
+// ---------- 项目级风格记忆（v2.0）----------
+function updateStyleCount() {
+  const n = $('#styleMemory').value.length;
+  const cap = state.styleMemoryChars || 2000;
+  $('#styleCount').textContent = `${n}/${cap}`;
+}
+
+$('#styleMemory').addEventListener('input', updateStyleCount);
+
+async function saveStyleMemory() {
+  const btn = $('#styleSaveBtn');
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '保存中…';
+  try {
+    const d = await api('/api/style', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ style: $('#styleMemory').value }),
+    });
+    $('#styleMemory').value = d.style || '';
+    updateStyleCount();
+    $('#styleNote').textContent = `已保存（${new Date(d.updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}）`;
+  } catch (err) {
+    $('#styleNote').textContent = '';
+    banner($('#genBanner'), err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+$('#styleSaveBtn').onclick = saveStyleMemory;
+
+async function loadStyleMemory() {
+  try {
+    const d = await api('/api/style');
+    $('#styleMemory').value = d.style || '';
+    if (d.limit) state.styleMemoryChars = d.limit;
+    updateStyleCount();
+    if (d.updatedAt) $('#styleNote').textContent = `上次保存 ${new Date(d.updatedAt).toLocaleString('zh-CN', { hour12: false })}`;
+  } catch { /* 忽略瞬时错误 */ }
+}
+
 // ---------- generate ----------
 $('#generateBtn').onclick = async () => {
   hide($('#genBanner'));
@@ -637,4 +681,5 @@ const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&a
   updatePromptCount($('#prompt').value.length);
   updateDurationHint();
   hint();
+  loadStyleMemory();
 })();

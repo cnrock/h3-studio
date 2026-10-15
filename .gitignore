@@ -5,3 +5,4 @@ data/
 probe-output.mp4
 .CDS_
 .DS_Store
+node_modules
