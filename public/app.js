@@ -412,43 +412,98 @@ async function loadStyleMemory() {
 }
 
 // ---------- generate ----------
-$('#generateBtn').onclick = async () => {
-  hide($('#genBanner'));
-  const prompt = $('#prompt').value.trim();
-  if (!prompt) return banner($('#genBanner'), '请输入提示词');
-  if (state.mode !== 't2va' && state.files.length === 0) {
-    return banner($('#genBanner'), state.mode === 'fl2va' ? '请至少上传 1 张图片' : '请至少上传 1 个参考文件');
-  }
-
-  // 参考视频时长预检：H3 硬要求每个参考视频 ∈ [2,15] 秒。
-  if (state.mode === 'ref2va') {
-    const vids = state.files.filter((f) => f.type.startsWith('video'));
-    const durs = await Promise.all(vids.map(videoDuration));
-    const tooShort = vids.find((f, i) => durs[i] && durs[i] < 2);
-    if (tooShort) return banner($('#genBanner'), `参考视频「${tooShort.name}」不足 2 秒，H3 要求每个参考视频至少 2 秒，请换用更长的片段。`);
-    const tooLong = vids.filter((f, i) => durs[i] && durs[i] > state.limits.maxRefVideoSec);
-    if (tooLong.length) {
-      banner($('#genBanner'), `参考视频超过 ${state.limits.maxRefVideoSec} 秒，已自动截取前 ${state.limits.maxRefVideoSec} 秒参与生成：${tooLong.map((f) => f.name).join('、')}`, 'ok');
-    }
-  }
-
+/** 读取当前表单参数（不含文件） */
+function readForm() {
   const [w, h] = $('#resolution').value.split('x').map(Number);
-  const fd = new FormData();
-  fd.set('mode', state.mode);
-  fd.set('prompt', prompt);
-  fd.set('width', w);
-  fd.set('height', h);
-  fd.set('aspect_ratio', $('#aspect').value);
-  fd.set('fps', $('#fps').value);
-  fd.set('num_inference_steps', $('#steps').value);
-  fd.set('flow_shift', $('#flowShift').value);
-  fd.set('duration', $('#duration').value);
-  fd.set('audio_flow_shift', $('#audioFlowShift').value);
-  if ($('#seed').value) fd.set('seed', $('#seed').value);
-  state.files.forEach((f) => fd.append('files', f));
+  return {
+    mode: state.mode,
+    prompt: $('#prompt').value.trim(),
+    width: w,
+    height: h,
+    aspect_ratio: $('#aspect').value,
+    fps: $('#fps').value,
+    num_inference_steps: $('#steps').value,
+    flow_shift: $('#flowShift').value,
+    duration: $('#duration').value,
+    audio_flow_shift: $('#audioFlowShift').value,
+    seed: $('#seed').value,
+  };
+}
 
-  const btn = $('#generateBtn');
-  btn.disabled = true;
+/** ref2va 参考视频时长预检（返回错误消息或 null） */
+async function precheckRefVideos() {
+  if (state.mode !== 'ref2va') return null;
+  const vids = state.files.filter((f) => f.type.startsWith('video'));
+  const durs = await Promise.all(vids.map(videoDuration));
+  const tooShort = vids.find((f, i) => durs[i] && durs[i] < 2);
+  if (tooShort) return `参考视频「${tooShort.name}」不足 2 秒，H3 要求每个参考视频至少 2 秒，请换用更长的片段。`;
+  const tooLong = vids.filter((f, i) => durs[i] && durs[i] > state.limits.maxRefVideoSec);
+  if (tooLong.length) {
+    banner($('#genBanner'), `参考视频超过 ${state.limits.maxRefVideoSec} 秒，已自动截取前 ${state.limits.maxRefVideoSec} 秒参与生成：${tooLong.map((f) => f.name).join('、')}`, 'ok');
+  }
+  return null;
+}
+
+function hidePlan() {
+  $('#planPanel').classList.add('hidden');
+  $('#confirmGenBtn').classList.add('hidden');
+  $('#cancelPlanBtn').classList.add('hidden');
+  $('#generateBtn').classList.remove('hidden');
+}
+
+/** 渲染分镜预演面板（段计划 + 预算） */
+function renderPlan(plan) {
+  $('#planTitle').textContent = plan.storyboard ? '分镜预演（按你的分镜脚本分段）' : '分段预演';
+  $('#planSummary').textContent = `${plan.mode} · ${plan.width}×${plan.height} · 共 ${plan.segments} 段 · 合计约 ${plan.totalSeconds.toFixed(1)} 秒`;
+  const budget = [];
+  if (plan.durationCapped) budget.push(`⚠️ 你填的 ${plan.requestedDuration} 秒超过上限 ${plan.maxDurationSec} 秒，已按上限生成`);
+  if (plan.credits != null) {
+    const modeTxt = plan.creditsMode === 'second' ? `按秒 ${plan.creditsPerSecond}/秒` : plan.creditsMode === 'job' ? `按条 ${plan.creditsPerJob}/条` : '';
+    budget.push(`本次预计消耗 <strong>${plan.credits}</strong> 点${modeTxt ? `（${modeTxt}）` : ''}${plan.userCredits != null ? `，当前余额 ${plan.userCredits} 点` : ''}`);
+  } else {
+    budget.push('当前未开启计费。');
+  }
+  $('#planBudget').innerHTML = budget.join('；');
+
+  const box = $('#planSegments');
+  box.innerHTML = '';
+  for (const s of plan.segmentList) {
+    const el = document.createElement('div');
+    el.className = 'plan-seg';
+    const modeTxt = s.usePrevFrame ? '以上段末帧续写' : s.mode;
+    el.innerHTML = `<div class="plan-seg-head"><span class="plan-seg-no">第 ${s.index} 段</span>`
+      + `<span class="plan-seg-meta">${s.seconds.toFixed(2)}s · ${modeTxt} · ${s.promptChars} 字</span></div>`;
+    const body = document.createElement('div');
+    body.className = 'plan-seg-body';
+    body.textContent = s.prompt;
+    el.appendChild(body);
+    box.appendChild(el);
+  }
+  $('#planPanel').classList.remove('hidden');
+  $('#confirmGenBtn').classList.remove('hidden');
+  $('#cancelPlanBtn').classList.remove('hidden');
+  $('#generateBtn').classList.add('hidden');
+}
+
+/** 真正提交（确认后调用；也用于单段免确认） */
+async function submitGenerate() {
+  const f = readForm();
+  const fd = new FormData();
+  fd.set('mode', f.mode);
+  fd.set('prompt', f.prompt);
+  fd.set('width', f.width);
+  fd.set('height', f.height);
+  fd.set('aspect_ratio', f.aspect_ratio);
+  fd.set('fps', f.fps);
+  fd.set('num_inference_steps', f.num_inference_steps);
+  fd.set('flow_shift', f.flow_shift);
+  fd.set('duration', f.duration);
+  fd.set('audio_flow_shift', f.audio_flow_shift);
+  if (f.seed) fd.set('seed', f.seed);
+  state.files.forEach((file) => fd.append('files', file));
+
+  const btns = [$('#generateBtn'), $('#confirmGenBtn')];
+  btns.forEach((b) => { b.disabled = true; });
   $('#genNote').innerHTML = '<span class="spinner"></span> 已提交，生成中（H3 逐个串行处理，请耐心等待）…';
   try {
     const res = await api('/api/generate', { method: 'POST', body: fd });
@@ -464,12 +519,55 @@ $('#generateBtn').onclick = async () => {
       const per = uniform
         ? `${fs_[0]} 帧 · ${secs[0].toFixed(2)}s`
         : fs_.slice(0, 3).map((v, i) => `${v} 帧·${secs[i].toFixed(1)}s`).join('、') + (fs_.length > 3 ? '…' : '');
-      msgs.push(`将分 ${adj.segments} 段生成，每段${uniform ? '' : '约'} ${per}，合计约 ${(adj.totalDuration || 0).toFixed(0)}s`);
+      msgs.push(`已分 ${adj.segments} 段生成，每段${uniform ? '' : '约'} ${per}，合计约 ${(adj.totalDuration || 0).toFixed(0)}s`);
     } else if (adj && adj.durationSnapped) {
       msgs.push(`时长已吸附到 H3 合法帧网格：${adj.snappedFrames} 帧 · ${adj.snappedSeconds.toFixed(2)}s`);
     }
     banner($('#genBanner'), `任务已提交${msgs.length ? '。' + msgs.join('；') : ''}。生成完成后显示在下方。`, msgs.length ? 'err' : 'ok');
+    hidePlan();
     loadJobs();
+  } catch (err) {
+    banner($('#genBanner'), err.message);
+  } finally {
+    btns.forEach((b) => { b.disabled = false; });
+    $('#genNote').textContent = '';
+  }
+}
+
+$('#generateBtn').onclick = async () => {
+  hide($('#genBanner'));
+  const f = readForm();
+  if (!f.prompt) return banner($('#genBanner'), '请输入提示词');
+  if (state.mode !== 't2va' && state.files.length === 0) {
+    return banner($('#genBanner'), state.mode === 'fl2va' ? '请至少上传 1 张图片' : '请至少上传 1 个参考文件');
+  }
+  const refErr = await precheckRefVideos();
+  if (refErr) return banner($('#genBanner'), refErr);
+
+  // 先取「分段计划 + 预算」（不入队、不调用 H3）
+  const btn = $('#generateBtn');
+  btn.disabled = true;
+  $('#genNote').innerHTML = '<span class="spinner"></span> 正在计算分段与预估…';
+  try {
+    const plan = await api('/api/generate/plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: f.mode,
+        prompt: f.prompt,
+        width: f.width,
+        height: f.height,
+        duration: f.duration,
+        imageCount: state.files.filter((x) => x.type.startsWith('image')).length,
+      }),
+    });
+    if (!plan.requiresConfirm) {
+      // 单段短影片：不被门禁打扰，直接提交
+      btn.disabled = false;
+      $('#genNote').textContent = '';
+      return submitGenerate();
+    }
+    renderPlan(plan);
   } catch (err) {
     banner($('#genBanner'), err.message);
   } finally {
@@ -477,6 +575,9 @@ $('#generateBtn').onclick = async () => {
     $('#genNote').textContent = '';
   }
 };
+
+$('#confirmGenBtn').onclick = () => { hide($('#genBanner')); submitGenerate(); };
+$('#cancelPlanBtn').onclick = () => { hidePlan(); hide($('#genBanner')); };
 
 // ---------- jobs ----------
 $('#refreshBtn').onclick = loadJobs;

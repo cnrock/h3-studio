@@ -276,11 +276,15 @@ async function runJob(jobId) {
  *   off   ：不计费，返回 null
  * 余额不足则扣到 0（允许透支，任务已生成不回收）。返回本次消耗点数。
  */
-function chargeFor(jobId, userId, seconds) {
+export function estimateCredits(seconds) {
   const mode = config.creditsMode;
-  let cost = 0;
-  if (mode === 'second') cost = Math.ceil((seconds || 0) * config.creditsPerSecond);
-  else if (mode === 'job') cost = Math.ceil(config.creditsPerJob);
+  if (mode === 'second') return Math.ceil((seconds || 0) * config.creditsPerSecond) || null;
+  if (mode === 'job') return Math.ceil(config.creditsPerJob) || null;
+  return null;
+}
+
+function chargeFor(jobId, userId, seconds) {
+  const cost = estimateCredits(seconds);
   if (!cost) return null;
   const u = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId);
   if (!u) return cost;

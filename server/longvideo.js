@@ -364,10 +364,13 @@ async function concatSegments(segmentPaths, outPath) {
  *     第 2 段起用上一段末帧续写，避免后段重复前段。
  *  B. 普通提示词 → 均匀分段，并给每段附加"承接上段、不要重复开头"的续写指令。
  */
-export async function generateLongVideo(o) {
-  const onProgress = o.onProgress || (() => {});
-  // 参考视频先规整到 H3 允许范围（每段 2–15s、合计 ≤15s），否则 H3 会 500
-  o = { ...o, files: await normalizeReferenceVideos(o.files || []) };
+/**
+ * 只做「分段计划」的纯函数版本（不触碰文件、不调用后端）。
+ * 与 generateLongVideo 共用同一套逻辑，保证「预演看到的」==「真正执行的」。
+ *
+ * 返回 { storyboard, plans:[{ prompt, mode, duration, usePrevFrame }] }。
+ */
+export function planSegmentPrompts(o) {
   const storyboard = parseStoryboard(o.prompt);
 
   let plans; // [{ prompt, mode, duration, usePrevFrame }]
@@ -409,6 +412,15 @@ export async function generateLongVideo(o) {
       return { prompt: o.prompt + cont, mode: i === 0 ? o.mode : 'fl2va', duration: dur, usePrevFrame: i > 0 };
     });
   }
+
+  return { storyboard, plans };
+}
+
+export async function generateLongVideo(o) {
+  const onProgress = o.onProgress || (() => {});
+  // 参考视频先规整到 H3 允许范围（每段 2–15s、合计 ≤15s），否则 H3 会 500
+  o = { ...o, files: await normalizeReferenceVideos(o.files || []) };
+  const { storyboard, plans } = planSegmentPrompts(o);
 
   if (plans.length <= 1) {
     onProgress({ stage: 'video', current: 1, total: 1 });

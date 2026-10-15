@@ -144,7 +144,22 @@
 
       <div class="actions">
         <button id="generateBtn">开始生成</button>
+        <button id="confirmGenBtn" class="hidden">确认并生成</button>
+        <button id="cancelPlanBtn" class="ghost hidden">返回修改</button>
         <span class="muted" id="genNote"></span>
+      </div>
+
+      <div id="planPanel" class="plan-panel hidden">
+        <div class="plan-head">
+          <strong id="planTitle">分镜预演</strong>
+          <span class="muted" id="planSummary"></span>
+        </div>
+        <div class="muted" id="planBudget"></div>
+        <div id="planSegments" class="plan-segments"></div>
+        <div class="muted plan-foot">
+          以上是每段实际会交给 H3 的提示词与时长。确认后才会真正开始烧算力；
+          第 2 段起会自动以上一段末帧续写，保持人物与色调连贯。
+        </div>
       </div>
     </div>
 

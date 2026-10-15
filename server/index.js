@@ -9,11 +9,11 @@ import {
   checkPassword, createUser, findUserByEmail, findUserById, publicUser,
   ensureVerifyToken, resetPassword, setResetToken, signToken, verifyByToken, authMiddleware,
 } from './auth.js';
-import { createJob, deleteJob, enqueue, getJob, listJobs, reconcileOnBoot, regenerateJob, statsForUser } from './jobs.js';
+import { createJob, deleteJob, enqueue, getJob, listJobs, reconcileOnBoot, regenerateJob, statsForUser, estimateCredits } from './jobs.js';
 import { presetsForClient, normalizeSize, aspectFor, ALIGN } from './resolutions.js';
 import { gridInfo, gridDuration } from './frameGrid.js';
-import { planSegments } from './longvideo.js';
-import { ref2vaScaffold, ref2vaTagList, REF2VA_TEMPLATE, tagsFromTypes } from './promptHints.js';
+import { planSegments, planSegmentPrompts } from './longvideo.js';
+import { ref2vaScaffold, ref2vaTagList, REF2VA_TEMPLATE, tagsFromTypes, injectFl2vaAlignment } from './promptHints.js';
 import { checkPrompt, renderFindings } from './promptCheck.js';
 import { rewritePrompt, captionReferences } from './promptWriter.js';
 import { getStyleMemory, setStyleMemory, withStyleMemory } from './styleMemory.js';
@@ -280,6 +280,79 @@ app.post('/api/auth/reset', async (req, res) => {
 
 // ---------- generation ----------
 const MODES = new Set(['t2va', 'fl2va', 'ref2va']);
+
+// 长视频提交门禁（v1.11）：只做「分段预演 + 预算预估」，不入队、不调用 H3。
+// 与 /api/generate 共用同一套分段逻辑（planSegmentPrompts），保证「预演所见 == 真正执行」。
+// 只用 JSON body（不需要文件），因此不会重复上传参考素材。
+app.post('/api/generate/plan', authMiddleware, (req, res) => {
+  try {
+    const mode = String(req.body.mode || 't2va');
+    if (!MODES.has(mode)) return res.status(400).json({ error: '不支持的生成模式' });
+    const prompt = String(req.body.prompt || '').trim();
+    if (!prompt) return res.status(400).json({ error: '请输入提示词' });
+    if (prompt.length > config.limits.promptChars) return res.status(400).json({ error: `提示词过长（上限 ${config.limits.promptChars} 字符）` });
+
+    // 风格记忆与生成路径一致地注入（预演看到的就是实际会发的内容）
+    const styleApplied = withStyleMemory(prompt, getStyleMemory(req.user.id).text);
+
+    const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
+    const size = normalizeSize(num(req.body.width, 1344), num(req.body.height, 768));
+    if (size.error) return res.status(400).json({ error: size.error });
+
+    const cap = config.limits.maxDurationSec;
+    const rawDuration = num(req.body.duration, 5);
+    const durClamped = Math.max(4, Math.min(rawDuration, cap));
+    const durationCapped = rawDuration > cap;
+
+    const { storyboard, plans } = planSegmentPrompts({ prompt: styleApplied, mode, duration: durClamped });
+    const totalSeconds = plans.reduce((a, p) => a + p.duration, 0);
+    const credits = estimateCredits(totalSeconds);
+
+    // 每段详情：第 2 段起以上段末帧续写（等价 fl2va），注入对齐指令以便看到真实发送内容
+    const imgCount = Math.max(0, Number(req.body.imageCount) || 0);
+    const segments = plans.map((p, i) => {
+      const segMode = i === 0 ? p.mode : (p.usePrevFrame ? 'fl2va' : 't2va');
+      const shown = segMode === 'fl2va'
+        ? injectFl2vaAlignment(p.prompt, { imageCount: i === 0 ? Math.max(1, imgCount) : 1, duration: p.duration })
+        : p.prompt;
+      return {
+        index: i + 1,
+        seconds: p.duration,
+        mode: segMode,
+        usePrevFrame: !!p.usePrevFrame,
+        promptChars: shown.length,
+        prompt: shown,
+      };
+    });
+
+    res.json({
+      ok: true,
+      plan: true,
+      storyboard: !!storyboard,
+      segments: segments.length,
+      totalSeconds,
+      duration: durClamped,
+      requestedDuration: rawDuration,
+      maxDurationSec: cap,
+      durationCapped,
+      width: size.width,
+      height: size.height,
+      aspectRatio: aspectFor(size.width, size.height),
+      sizeChanged: size.changed,
+      mode,
+      credits,
+      creditsMode: config.creditsMode,
+      creditsPerSecond: config.creditsPerSecond,
+      creditsPerJob: config.creditsPerJob,
+      userCredits: req.user.credits ?? null,
+      // 需人工确认的条件：多段（超过单段上限）——单段短影片直接放行，不打扰
+      requiresConfirm: segments.length > 1,
+      segmentList: segments,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.post('/api/generate', authMiddleware, upload.array('files', config.limits.maxFiles), (req, res) => {
   try {

@@ -210,6 +210,19 @@ button.link { background: transparent; border: 0; color: var(--accent); padding:
 .badge.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
 /* ---------- 进度指示 ---------- */
+/* ---- 长视频提交门禁：分镜预演面板（v1.11） ---- */
+.plan-panel { margin-top: 18px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel-2); padding: 16px; }
+.plan-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.plan-head strong { font-size: 15px; }
+.plan-budget { margin: 6px 0 4px; }
+.plan-segments { display: grid; gap: 10px; margin: 12px 0; }
+.plan-seg { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel); padding: 10px 12px; }
+.plan-seg-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.plan-seg-no { font-weight: 600; font-size: 13px; }
+.plan-seg-meta { font-size: 12px; color: var(--muted); }
+.plan-seg-body { font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; color: var(--text); max-height: 190px; overflow: auto; }
+.plan-foot { margin-top: 6px; line-height: 1.6; }
+
 .spinner { width: 15px; height: 15px; border: 2px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; border-radius: 50%; animation: spin .8s linear infinite; display: inline-block; vertical-align: -3px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .center { text-align: center; }
