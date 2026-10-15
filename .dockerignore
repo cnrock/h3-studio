@@ -1,0 +1,7 @@
+node_modules
+data
+.git
+*.log
+.env
+probe-output.mp4
+.DS_Store

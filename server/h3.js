@@ -4,6 +4,12 @@ import crypto from 'node:crypto';
 import { config } from './config.js';
 import { log } from './log.js';
 
+// 连接期瞬时错误（socket hang up / ECONNRESET 等）的重试次数。
+// v1.11.1：排队视频里「第 1 条正常、第 2 条 0ms 报 socket hang up」的根因是
+// Node 默认 keep-alive 连接池复用了已被对端关闭的旧 socket；这里禁 keep-alive
+// 并把瞬时连接错误重试一次（不重试 4xx/5xx 这类业务错误）。
+const H3_NET_ATTEMPTS = 2;
+
 /**
  * Build and send a MiniMax H3 (vLLM-Omni) video request.
  *
@@ -118,33 +124,59 @@ export async function generateVideo(o) {
   };
   if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
 
-  const { status, contentType, buffer } = await new Promise((resolve, reject) => {
-    const req = lib.request(
-      {
-        protocol: url.protocol,
-        hostname: url.hostname,
-        port: url.port || (isHttps ? 443 : 80),
-        path: url.pathname + url.search,
-        method: 'POST',
-        headers,
-        timeout: config.h3.timeoutMs, // 含连接、发送、等待响应（Node 会在超时后销毁 socket）
-      },
-      (res) => {
-        const chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () =>
-          resolve({
-            status: res.statusCode,
-            contentType: res.headers['content-type'] || '',
-            buffer: Buffer.concat(chunks),
-          }),
-        );
-      },
-    );
-    req.on('timeout', () => req.destroy(new Error(`H3 请求超时（>${config.h3.timeoutMs} ms）`)));
-    req.on('error', reject);
-    req.end(body);
-  });
+  // 单次 HTTP 请求。agent:false => 每次新建连接、不复用 keep-alive 连接池。
+  // H3 单段要跑数分钟，长时间空闲后服务端/中间设备会先关掉这条长连接；下一个
+  // 任务若复用池中这条「已被对端关闭」的 socket，就会在 0ms 内直接 socket hang up。
+  const doRequest = () =>
+    new Promise((resolve, reject) => {
+      const req = lib.request(
+        {
+          protocol: url.protocol,
+          hostname: url.hostname,
+          port: url.port || (isHttps ? 443 : 80),
+          path: url.pathname + url.search,
+          method: 'POST',
+          headers,
+          agent: false, // 禁 keep-alive：不复用可能已被对端关闭的旧连接
+          timeout: config.h3.timeoutMs, // 含连接、发送、等待响应（Node 会在超时后销毁 socket）
+        },
+        (res) => {
+          const chunks = [];
+          res.on('data', (c) => chunks.push(c));
+          res.on('end', () =>
+            resolve({
+              status: res.statusCode,
+              contentType: res.headers['content-type'] || '',
+              buffer: Buffer.concat(chunks),
+            }),
+          );
+        },
+      );
+      req.on('timeout', () => req.destroy(new Error(`H3 请求超时（>${config.h3.timeoutMs} ms）`)));
+      req.on('error', reject);
+      req.end(body);
+    });
+
+  let status;
+  let contentType;
+  let buffer;
+  let netErr;
+  for (let attempt = 1; attempt <= H3_NET_ATTEMPTS; attempt++) {
+    try {
+      ({ status, contentType, buffer } = await doRequest());
+      netErr = null;
+      break;
+    } catch (err) {
+      netErr = err;
+      const transient = /socket hang up|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|socket disconnected|other side closed/i.test(
+        String(err.message || err),
+      );
+      log.warn(`H3 连接失败（第 ${attempt}/${H3_NET_ATTEMPTS} 次）：${err.message || err}`);
+      if (!transient || attempt >= H3_NET_ATTEMPTS) break;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  if (netErr) throw netErr;
 
   const text = () => buffer.toString('utf8').slice(0, 500);
 

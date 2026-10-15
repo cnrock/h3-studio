@@ -14,6 +14,12 @@ const execFileP = promisify(execFile);
 
 export const H3_MAX_SECONDS = 15;
 
+// 段间交叉溶解（xfade/acrossfade）时长（秒）。
+// v1.11.1：此前是硬切拼接，段边界处画面/音频瞬间跳变，视觉上就是「中间卡一下」。
+// 用短交叉溶解把两段在边界处短暂叠加，接缝自然消失、听感更连贯；
+// 每处溶解会让成片总时长减少 XFADE_SECONDS，这里取 0.25s（占单段 15s 的 ~1.7%，无明显内容损失）。
+const XFADE_SECONDS = 0.25;
+
 /** 清理从聊天/文档粘贴来的转义符与 Markdown 加粗标记 */
 function cleanText(s) {
   return String(s ?? '')
@@ -303,6 +309,8 @@ async function normalizeSegment(input, output, { withAudio, clampSeconds }) {
 async function concatSegments(segmentPaths, outPath) {
   const workDir = path.dirname(outPath);
   const normalized = [];
+  const vDurs = []; // 各段归一化后的视频时长（用于计算 xfade 偏移）
+  let allHaveAudio = true;
 
   // 1) 逐段归一化
   for (let i = 0; i < segmentPaths.length; i++) {
@@ -327,16 +335,78 @@ async function concatSegments(segmentPaths, outPath) {
       log.warn(`第 ${i + 1} 段归一化后音视频仍相差 ${(aOut - vOut).toFixed(3)}s（video ${vOut} / audio ${aOut}）`);
     }
     normalized.push(begin);
+    vDurs.push(vOut);
+    if (!aOut) allHaveAudio = false;
   }
 
-  // 2) 拼接：必须【重新编码】。
-  //    即使各段已归一化（时间戳归零、CFR），`-c copy` 仍会因 AAC 编码器延时/
-  //    容器时长误差在段边界留下 0.02~0.07s 的间隙，浏览器播到该处会卡住。
-  //    实测：归一化+copy 有间隙；归一化+重编码 无间隙。
+  // 2) 拼接。
+  //    v1.11.1：段间不再硬切，改用 xfade（视频）+ acrossfade（音频）交叉溶解，
+  //    消除段边界处「画面/声音瞬间跳变」造成的那一下卡顿感。
+  //    每处溶解时长 XFADE_SECONDS，偏移按各段实际时长累减精确计算。
+  const fps = await fpsArgs();
+  const dursKnown = vDurs.length === normalized.length && vDurs.every((v) => Number.isFinite(v) && v > XFADE_SECONDS * 2);
+  if (!dursKnown && normalized.length >= 2) {
+    log.warn('分段时长未知或过短，退回硬切拼接（无法安全计算交叉溶解偏移）');
+  }
+  const useCrossfade = normalized.length >= 2 && allHaveAudio && dursKnown;
+
+  if (useCrossfade) {
+    const d = XFADE_SECONDS;
+    const parts = [];
+    let vPrev = '[0:v]';
+    let aPrev = '[0:a]';
+    let acc = vDurs[0]; // 已拼接部分的当前时长（= 下一处溶解的偏移基准）
+    for (let i = 1; i < normalized.length; i++) {
+      const vOut = `[v${i}]`;
+      const aOut = `[a${i}]`;
+      const offset = Math.max(0, acc - d);
+      parts.push(`${vPrev}[${i}:v]xfade=transition=fade:duration=${d}:offset=${offset.toFixed(4)}${vOut}`);
+      parts.push(`${aPrev}[${i}:a]acrossfade=d=${d}:c1=tri:c2=tri${aOut}`);
+      vPrev = vOut;
+      aPrev = aOut;
+      acc = acc + vDurs[i] - d;
+    }
+    const args = ['-y', '-loglevel', 'error'];
+    for (const p of normalized) args.push('-i', p);
+    args.push(
+      '-filter_complex', parts.join(';'),
+      '-map', vPrev, '-map', aPrev,
+      '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+      '-r', '24', ...fps,
+      '-c:a', 'aac', '-b:a', '192k', '-ar', '32000', '-ac', '2',
+      '-shortest',
+      '-movflags', '+faststart',
+      outPath,
+    );
+    try {
+      await execFileP('ffmpeg', args, { maxBuffer: 1024 * 1024 * 16 });
+    } catch (err) {
+      // 交叉溶解失败（个别段异常）时退回硬切拼接，保证总能出片
+      log.warn(`交叉溶解拼接失败，退回硬切拼接：${err.message}`);
+      await concatHardCuts(normalized, outPath, fps);
+    }
+  } else {
+    if (normalized.length >= 2 && !allHaveAudio) {
+      log.warn('有分段缺音轨，退回硬切拼接（无法做音频交叉溶解）');
+    }
+    await concatHardCuts(normalized, outPath, fps);
+  }
+  const vOut = await probeStreamDuration(outPath, 'v:0');
+  const aOut = await probeStreamDuration(outPath, 'a:0');
+  log.debug(`拼接后成片：video=${vOut ?? '?'}s audio=${aOut ?? '?'}s 段数=${segmentPaths.length}`);
+  return outPath;
+}
+
+/**
+ * 硬切拼接（回退路径）：重新编码后用 concat demuxer 顺序拼接，无交叉溶解。
+ * 即使各段已归一化（时间戳归零、CFR），`-c copy` 仍会因 AAC 编码器延时/容器
+ * 时长误差在段边界留下 0.02~0.07s 间隙，故这里仍必须重新编码。
+ */
+async function concatHardCuts(normalized, outPath, fps) {
+  const workDir = path.dirname(outPath);
   const listFile = path.join(workDir, `concat-${Date.now()}.txt`);
   fs.writeFileSync(listFile, normalized.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
   try {
-    const fps = await fpsArgs();
     await execFileP('ffmpeg', [
       '-y', '-loglevel', 'error',
       '-f', 'concat', '-safe', '0', '-i', listFile,
@@ -350,9 +420,6 @@ async function concatSegments(segmentPaths, outPath) {
   } finally {
     try { fs.unlinkSync(listFile); } catch {}
   }
-  const vOut = await probeStreamDuration(outPath, 'v:0');
-  const aOut = await probeStreamDuration(outPath, 'a:0');
-  log.debug(`拼接后成片：video=${vOut ?? '?'}s audio=${aOut ?? '?'}s 段数=${segmentPaths.length}`);
   return outPath;
 }
 

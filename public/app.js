@@ -649,6 +649,15 @@ function jobCard(j) {
       ? `分段生成中：第 ${prog.current}/${prog.total} 段${prog.stage === 'concat' ? '（正在拼接）' : ''}`
       : '';
   const pending = queueText || progText || '';
+  // 出片自检（v1.11.1）：成片后自动质检，结果附在 progress.qa（只提示、不拦截）
+  const qa = prog && prog.qa;
+  const qaFindings = (qa && qa.findings) || [];
+  const qaWarn = qaFindings.some((f) => f.level === 'warn');
+  const qaText = qa
+    ? (qaFindings.length
+        ? `出片自检：${qaFindings.map((f) => f.message).join('；')}`
+        : '出片自检：未发现问题 ✔')
+    : '';
   // 超过了后端请求硬超时仍处于 running：基本可以确定已卡死（不再占用 GPU）
   const stallHint =
     j.status === 'running' && j.stale
@@ -680,6 +689,7 @@ function jobCard(j) {
       <div class="muted">${j.mode} · ${j.params?.duration || '?'}s${j.bytes ? ' · ' + (j.bytes / 1048576).toFixed(1) + ' MB' : ''}</div>
       ${timingText ? `<div class="muted" style="font-size:12px">${escapeHtml(timingText)}</div>` : ''}
       ${st.credits ? `<div class="muted" style="font-size:12px">消耗 ${st.credits} 点</div>` : ''}
+      ${qaText ? `<div class="muted" style="font-size:12px;color:${qaWarn ? 'var(--warn,#d9a441)' : 'var(--ok,#4caf50)'}">${escapeHtml(qaText)}</div>` : ''}
       ${stallHint ? `<div class="muted" style="color:var(--warn,#d9a441)">${escapeHtml(stallHint)}</div>` : ''}
       ${j.error ? `<div class="muted" style="color:var(--danger)">${escapeHtml(j.error)}</div>` : ''}
       <div class="actions" style="margin-top:auto">

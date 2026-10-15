@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { config } from './config.js';
 import { db, now } from './db.js';
 import { generateLongVideo } from './longvideo.js';
+import { analyzeVideo } from './qaCheck.js';
 import { log } from './log.js';
 
 fs.mkdirSync(config.outputsDir, { recursive: true });
@@ -246,10 +247,26 @@ async function runJob(jobId) {
         fs.copyFileSync(filePath, dest);
         try { fs.unlinkSync(filePath); } catch {}
       }
+      // 出片自检（v1.11.1）：成片落盘后跑一遍轻量质检，结果附在 progress.qa 里。
+      // 只提示、不拦截；自检本身失败不影响交付。
+      let qa = null;
+      if (config.qaEnabled) {
+        try {
+          qa = await analyzeVideo(dest);
+          const warns = (qa.findings || []).filter((f) => f.level === 'warn').length;
+          log.info(
+            `出片自检 ${jobId.slice(0, 8)}：${(qa.findings || []).length} 条（警告 ${warns}）` +
+              (qa.videoSeconds ? ` 视频=${qa.videoSeconds?.toFixed?.(2)}s 音频=${qa.audioSeconds?.toFixed?.(2) ?? '-'}s` : ''),
+          );
+        } catch (err) {
+          log.warn(`出片自检失败（不影响交付）：${err.message}`);
+        }
+      }
+
       setStatus(jobId, 'done', {
         output_file: fileName,
         output_bytes: fs.statSync(dest).size,
-        progress: JSON.stringify({ stage: 'done', segments, seconds }),
+        progress: JSON.stringify({ stage: 'done', segments, seconds, qa }),
         finished_at: now(),
         seconds,
         credits: chargeFor(jobId, row.user_id, seconds),

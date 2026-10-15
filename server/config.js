@@ -52,6 +52,9 @@ export const config = {
   // 日志级别（v1.8.3）：debug | info（默认）| warn | error | silent。
   // 默认 info 即可看到每个请求/每个任务/每段生成；H3_DEBUG=1 等价于 debug。
   logLevel: String(process.env.LOG_LEVEL || '').toLowerCase() || (bool(process.env.H3_DEBUG, false) ? 'debug' : 'info'),
+  // 出片自检（v1.11.1）：成片落盘后自动跑音画时长/静音/削波/冻帧检查，结果附在任务里。
+  // 只提示、不拦截。设 QA_CHECK=0 可关闭。
+  qaEnabled: bool(process.env.QA_CHECK, true),
   // 计费开关：off=不计费（仅统计，默认）；second=按【秒】计费；job=按【条】计费。
   // 显式设 CREDITS_MODE 优先；未设时按费率推断（CREDITS_PER_JOB>0 则 job，CREDITS_PER_SECOND>0 则 second）。
   creditsMode: creditsMode(),
