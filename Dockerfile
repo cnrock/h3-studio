@@ -22,7 +22,8 @@ RUN set -eux; \
     printf 'deb http://archive.debian.org/debian bullseye main\ndeb http://archive.debian.org/debian-security bullseye-security main\n' \
       > /etc/apt/sources.list; \
     apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=3 update -qq; \
-    apt-get install -y --no-install-recommends curl vim-tiny fontconfig; \
+    apt-get install -y --no-install-recommends ca-certificates curl vim-tiny fontconfig; \
+    update-ca-certificates; \
     # Noto Sans CJK SC (OTF)
     mkdir -p /usr/share/fonts/opentype/noto && \
     curl -fsSL -o /usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf \
