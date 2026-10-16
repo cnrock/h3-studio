@@ -463,6 +463,14 @@ async function loadStyleMemory() {
   } catch { /* 忽略瞬时错误 */ }
 }
 
+// ---------- drawtext 烧字配置（可选后期步骤）----------
+function updateDrawtextState() {
+  const enabled = $('#drawtextEnabled').checked;
+  $('#drawtextOptions').classList.toggle('hidden', !enabled);
+}
+
+$('#drawtextEnabled').addEventListener('change', updateDrawtextState);
+
 // ---------- generate ----------
 /** 读取当前表单参数（不含文件） */
 function readForm() {
@@ -480,6 +488,17 @@ function readForm() {
     turbo: state.turbo, // Turbo 模式时传递，服务端可加 quality=high
     audio_flow_shift: $('#audioFlowShift').value,
     seed: $('#seed').value,
+    // drawtext 后期烧字参数
+    drawtextEnabled: $('#drawtextEnabled').checked,
+    drawtextFont: $('#drawtextFont').value,
+    drawtextText: $('#drawtextText').value,
+    drawtextFontSize: $('#drawtextFontSize').value,
+    drawtextX: $('#drawtextX').value,
+    drawtextY: $('#drawtextY').value,
+    drawtextColor: $('#drawtextColor').value,
+    drawtextBox: $('#drawtextBox').checked,
+    drawtextBoxColor: $('#drawtextBoxColor').value,
+    drawtextBoxBorderW: $('#drawtextBoxBorderW').value,
   };
 }
 
@@ -552,7 +571,19 @@ async function submitGenerate() {
   fd.set('flow_shift', f.flow_shift);
   fd.set('duration', f.duration);
   fd.set('audio_flow_shift', f.audio_flow_shift);
+  fd.set('turbo', f.turbo);
   if (f.seed) fd.set('seed', f.seed);
+  // drawtext 后期烧字参数
+  fd.set('drawtextEnabled', f.drawtextEnabled);
+  fd.set('drawtextFont', f.drawtextFont);
+  fd.set('drawtextText', f.drawtextText);
+  fd.set('drawtextFontSize', f.drawtextFontSize);
+  fd.set('drawtextX', f.drawtextX);
+  fd.set('drawtextY', f.drawtextY);
+  fd.set('drawtextColor', f.drawtextColor);
+  fd.set('drawtextBox', f.drawtextBox);
+  fd.set('drawtextBoxColor', f.drawtextBoxColor);
+  fd.set('drawtextBoxBorderW', f.drawtextBoxBorderW);
   state.files.forEach((file) => fd.append('files', file));
 
   const btns = [$('#generateBtn'), $('#confirmGenBtn')];

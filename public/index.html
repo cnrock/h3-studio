@@ -72,6 +72,46 @@
       </div>
     </div>
 
+    <!-- drawtext 后期烧字配置（可选步骤） -->
+    <details class="card" style="margin-top:12px">
+      <summary style="cursor:pointer"><strong>后期烧字 (drawtext)</strong> <span class="muted" style="font-size:13px">可选：在成片上叠加文本，解决模型侧中文渲染乱码</span></summary>
+      <div style="margin-top:12px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="drawtextEnabled" /> <span style="font-weight:500">启用后期烧字</span>
+        </label>
+        <div id="drawtextOptions" class="hidden" style="margin-top:10px">
+          <div class="row narrow">
+            <div>
+              <label>字体</label>
+              <select id="drawtextFont">
+                <option value="noto">Noto Sans CJK SC (OTF) — 推荐，字重规整</option>
+                <option value="wqy">WQY Zenhei (TTC) — 备选，开源黑体</option>
+              </select>
+            </div>
+            <div><label>字号</label><input type="number" id="drawtextFontSize" value="48" min="12" max="200" /></div>
+          </div>
+          <div class="row narrow" style="margin-top:8px">
+            <div><label>水平位置 (x)</label><input type="text" id="drawtextX" value="(w-text_w)/2" placeholder="ffmpeg 表达式，如 (w-text_w)/2" /></div>
+            <div><label>垂直位置 (y)</label><input type="text" id="drawtextY" value="h-th-50" placeholder="ffmpeg 表达式，如 h-th-50" /></div>
+          </div>
+          <div class="row narrow" style="margin-top:8px">
+            <div><label>文字颜色</label><input type="text" id="drawtextColor" value="white" placeholder="如 white, #ff0000, 0xffffff" /></div>
+            <div><label>背景框颜色</label><input type="text" id="drawtextBoxColor" value="black@0.5" placeholder="如 black@0.5, #000000@0.7" /></div>
+          </div>
+          <div class="row narrow" style="margin-top:8px">
+            <div>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                <input type="checkbox" id="drawtextBox" checked /> <span>显示背景框</span>
+              </label>
+            </div>
+            <div><label>背景框边距</label><input type="number" id="drawtextBoxBorderW" value="10" min="0" max="50" /></div>
+          </div>
+          <label style="margin-top:8px;display:block">要烧录的文本 <span class="muted" style="font-size:12px">（留空则不烧字；支持中英文，特殊字符会自动转义）</span></label>
+          <textarea id="drawtextText" placeholder="例如：片尾字幕、水印、时间戳等" rows="3" style="margin-top:6px;width:100%"></textarea>
+        </div>
+      </div>
+    </details>
+
     <div class="card">
       <h2>生成视频</h2>
       <div id="genBanner" class="banner"></div>

@@ -16,12 +16,22 @@ COPY --from=ffmpeg /ffprobe /usr/bin/ffprobe
 # curl / vim：容器内排障用（curl 探 vLLM 端点、vim 临时改文件）。
 # bullseye 已进 LTS 尾声，官方 security 源常见 404（vim-tiny/curl 的 .deb 都拉不到），
 # 故改用 archive.debian.org 归档源；Check-Valid-Until=false 因归档源 Release 已过期。
+# 中文字体：Noto Sans CJK SC + WQY Zenhei，用于后期 drawtext 烧字（可选步骤）。
 RUN set -eux; \
     rm -f /etc/apt/sources.list.d/*; \
     printf 'deb http://archive.debian.org/debian bullseye main\ndeb http://archive.debian.org/debian-security bullseye-security main\n' \
       > /etc/apt/sources.list; \
     apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=3 update -qq; \
-    apt-get install -y --no-install-recommends curl vim-tiny; \
+    apt-get install -y --no-install-recommends curl vim-tiny fontconfig; \
+    # Noto Sans CJK SC (OTF)
+    mkdir -p /usr/share/fonts/opentype/noto && \
+    curl -fsSL -o /usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf \
+      'https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf'; \
+    # WQY Zenhei (TTF) - from deepin-community
+    mkdir -p /usr/share/fonts/truetype/wqy && \
+    curl -fsSL -o /usr/share/fonts/truetype/wqy/wqy-zenhei.ttc \
+      'https://github.com/deepin-community/fonts-wqy-zenhei/raw/master/wqy-zenhei.ttc'; \
+    fc-cache -fv; \
     rm -rf /var/lib/apt/lists/*
 
 # Install dependencies first (better layer caching)

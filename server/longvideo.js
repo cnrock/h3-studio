@@ -398,6 +398,73 @@ async function concatSegments(segmentPaths, outPath) {
 }
 
 /**
+ * 后期 drawtext 烧字（可选步骤）。
+ * 在成片上叠加文本，解决 H3 模型侧中文渲染乱码问题。
+ * 两种内置字体：Noto Sans CJK SC (OTF) / WQY Zenhei (TTC)。
+ * @param {string} inputPath - 输入视频路径
+ * @param {string} outputPath - 输出视频路径
+ * @param {object} opts - drawtext 选项
+ * @returns {Promise<string>} - 输出路径
+ */
+async function applyDrawtext(inputPath, outputPath, opts) {
+  const { text, font, fontSize, x, y, color, box, boxColor, boxBorderW } = opts || {};
+  if (!text || !text.trim()) return inputPath; // 空文本直接返回原片
+
+  // 字体文件路径映射（Dockerfile 已安装到这些路径）
+  const fontPaths = {
+    noto: '/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf',
+    wqy: '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+  };
+  const fontPath = fontPaths[font] || fontPaths.noto;
+  const safeFontSize = Math.max(12, Math.min(200, Number(fontSize) || 48));
+  const safeBoxBorderW = Math.max(0, Math.min(50, Number(boxBorderW) || 0));
+
+  // 验证字体文件存在
+  if (!fs.existsSync(fontPath)) {
+    log.warn(`drawtext 字体文件不存在：${fontPath}，跳过烧字`);
+    return inputPath;
+  }
+
+  // drawtext filter：转义文本中的特殊字符
+  // ffmpeg drawtext 需要转义 ':' '\' "' '%' 等字符
+  const escapedText = String(text)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/:/g, '\\:')
+    .replace(/%/g, '\\%');
+
+  const filter = `drawtext=fontfile=${fontPath}:text='${escapedText}':fontsize=${safeFontSize}:fontcolor=${color}:x=${x}:y=${y}${box ? `:box=1:boxcolor=${boxColor}:boxborderw=${safeBoxBorderW}` : ''}`;
+
+  log.info(`应用 drawtext 烧字：font=${font} text="${text.slice(0, 30)}..." size=${fontSize} pos=(${x},${y}) color=${color}`);
+
+  await execFileP('ffmpeg', [
+    '-y', '-loglevel', 'error',
+    '-i', inputPath,
+    '-vf', filter,
+    '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+    '-c:a', 'copy',
+    '-movflags', '+faststart',
+    outputPath,
+  ], { maxBuffer: 1024 * 1024 * 16 });
+
+  return outputPath;
+}
+
+async function maybeApplyDrawtext(inputPath, opts) {
+  if (!opts?.enabled || !String(opts.text || '').trim()) return inputPath;
+  const outputPath = path.join(os.tmpdir(), `h3-drawtext-${crypto.randomUUID()}.mp4`);
+  try {
+    await applyDrawtext(inputPath, outputPath, opts);
+    try { fs.unlinkSync(inputPath); } catch {}
+    return outputPath;
+  } catch (err) {
+    try { fs.unlinkSync(outputPath); } catch {}
+    log.warn(`drawtext 烧字失败，使用原片：${err.message}`);
+    return inputPath;
+  }
+}
+
+/**
  * 硬切拼接（回退路径）：重新编码后用 concat demuxer 顺序拼接，无交叉溶解。
  * 即使各段已归一化（时间戳归零、CFR），`-c copy` 仍会因 AAC 编码器延时/容器
  * 时长误差在段边界留下 0.02~0.07s 间隙，故这里仍必须重新编码。
@@ -500,7 +567,8 @@ export async function generateLongVideo(o) {
     // 写入临时文件后返回路径，避免把整片常驻内存
     const singlePath = path.join(os.tmpdir(), `h3-out-${crypto.randomUUID()}.mp4`);
     fs.writeFileSync(singlePath, bytes);
-    return { filePath: singlePath, segments: 1, seconds: plans[0].duration };
+    const finalPath = await maybeApplyDrawtext(singlePath, o.drawtext);
+    return { filePath: finalPath, segments: 1, seconds: plans[0].duration };
   }
 
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'h3-long-'));
@@ -590,10 +658,12 @@ export async function generateLongVideo(o) {
     log.info(`开始拼接 ${segPaths.length} 段…`);
     const outPath = path.join(workDir, 'final.mp4');
     await concatSegments(segPaths, outPath);
+    // 后期 drawtext 烧字（按本次任务的可选参数执行）
+    const renderedPath = await maybeApplyDrawtext(outPath, o.drawtext);
     // 把成片移出 workDir（workDir 会在 finally 被删），返回路径而非字节，
     // 避免长视频（可能数百 MB~数 GB）整块读进内存。
     const finalPath = path.join(os.tmpdir(), `h3-out-${crypto.randomUUID()}.mp4`);
-    fs.renameSync(outPath, finalPath);
+    fs.renameSync(renderedPath, finalPath);
     return { filePath: finalPath, segments: plans.length, seconds: plans.reduce((a, p) => a + p.duration, 0), storyboard: !!storyboard };
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
