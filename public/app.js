@@ -11,8 +11,8 @@ const MODE_HINTS = {
 const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15, maxDurationSec: 1800, creditsMode: 'off', creditsPerSecond: 0, creditsPerJob: 0, styleMemoryChars: 2000 }, turbo: false };
 
 // 标准档（短边 768）的 Turbo 参数
-export const TURBO_PARAMS = { steps: 5, flowShift: 6 };
-export const STD_PARAMS = { steps: 50, flowShift: 12 };
+const TURBO_PARAMS = { steps: 5, flowShift: 6 };
+const STD_PARAMS = { steps: 50, flowShift: 12 };
 
 // Turbo checkbox handler
 document.addEventListener('DOMContentLoaded', () => {
