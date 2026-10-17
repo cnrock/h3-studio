@@ -8,6 +8,17 @@ import { analyzeVideo } from './qaCheck.js';
 import { log } from './log.js';
 
 fs.mkdirSync(config.outputsDir, { recursive: true });
+const segmentRoot = path.join(config.dataDir, 'jobs');
+fs.mkdirSync(segmentRoot, { recursive: true });
+
+function jobWorkDir(jobId) {
+  return path.join(segmentRoot, jobId);
+}
+
+function readManifest(jobId) {
+  const file = path.join(jobWorkDir(jobId), 'manifest.json');
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
 
 // 逐段重试已在 longvideo.js 内部完成，外层不再整条重跑（避免重复消耗）
 const MAX_ATTEMPTS = 1;
@@ -40,6 +51,7 @@ export function deleteJob(id, userId) {
     try { fs.unlinkSync(path.join(config.outputsDir, row.output_file)); } catch {}
   }
   cleanupFiles(safeJson(row.params_json));
+  fs.rmSync(jobWorkDir(id), { recursive: true, force: true });
   db.prepare('DELETE FROM jobs WHERE id = ?').run(id);
   return true;
 }
@@ -49,18 +61,33 @@ export function deleteJob(id, userId) {
  * 参考文件在失败时被保留（见 runJob），因此无需用户重新走一遍上传流程。
  * 若文件已丢失（例如曾被删除或重启后清理），返回 {ok:false, reason:'files_missing'}。
  */
-export function regenerateJob(id, userId) {
+export function regenerateJob(id, userId, segmentIndex = null) {
   const row = db.prepare('SELECT * FROM jobs WHERE id = ? AND user_id = ?').get(id, userId);
   if (!row) return { ok: false, reason: 'not_found' };
   // 正在排队/生成 -> 默认拒绝；仅当 running 已超时（重启残留 / 请求已死）才允许接管重跑
-  if (row.status === 'running' || row.status === 'queued') {
-    if (!isStale(row)) return { ok: false, reason: 'busy' };
-    log.warn(`接管卡死的任务 ${id.slice(0, 8)}（running 已超时，强制重跑）`);
-  }
+  // 进程仍活着时，即使运行超时也不能与在途生成并发写同一分段目录。
+  if (row.status === 'queued' || row.status === 'running') return { ok: false, reason: 'busy' };
   const params = safeJson(row.params_json);
   // 参考文件是否仍在
   for (const f of params.files || []) {
     if (f.path && !fs.existsSync(f.path)) return { ok: false, reason: 'files_missing' };
+  }
+  if (segmentIndex !== null) {
+    const n = Number(segmentIndex);
+    if (!Number.isInteger(n) || n < 1) return { ok: false, reason: 'segment_invalid' };
+    const dir = jobWorkDir(id);
+    const file = path.join(dir, `seg-${String(n).padStart(2, '0')}.mp4`);
+    if (!fs.existsSync(file)) return { ok: false, reason: 'segment_missing' };
+    const manifest = readManifest(id);
+    if (!manifest?.segments?.[n - 1]) return { ok: false, reason: 'segment_missing' };
+    for (let i = n - 1; i < manifest.segments.length; i++) {
+      const segmentFile = path.join(dir, `seg-${String(i + 1).padStart(2, '0')}.mp4`);
+      try { fs.unlinkSync(segmentFile); } catch {}
+      manifest.segments[i] = { index: i + 1, seconds: manifest.segments[i].seconds, status: 'pending' };
+    }
+    manifest.updatedAt = now();
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    log.info(`指定重做任务 ${id.slice(0, 8)} 第 ${n} 段`);
   }
   setStatus(id, 'queued', { error: null, progress: null, started_at: null, finished_at: null, seconds: null, credits: null });
   enqueue(id);
@@ -75,6 +102,7 @@ const isStale = (row) =>
 
 function hydrate(row) {
   const queued = row.status === 'queued';
+  const manifest = readManifest(row.id);
   const created = row.created_at;
   const started = row.started_at || null;
   const finished = row.finished_at || null;
@@ -110,6 +138,7 @@ function hydrate(row) {
     error: row.error || null,
     bytes: row.output_bytes || null,
     progress: row.progress || null,
+    segments: manifest?.segments?.map(({ index, seconds, actualSeconds, status }) => ({ index, seconds, actualSeconds, status })) || null,
     // 排队位次：1 = 下一个执行
     queuePosition: qpos,
     queueLength: queue.length,
@@ -117,8 +146,8 @@ function hydrate(row) {
     updatedAt: row.updated_at,
     stale,
     stats,
-    videoUrl: row.output_file ? `/api/jobs/${row.id}/video` : null,
-    downloadUrl: row.output_file ? `/api/jobs/${row.id}/download` : null,
+    videoUrl: row.status === 'done' && row.output_file ? `/api/jobs/${row.id}/video` : null,
+    downloadUrl: row.status === 'done' && row.output_file ? `/api/jobs/${row.id}/download` : null,
   };
 }
 
@@ -238,6 +267,8 @@ async function runJob(jobId) {
         files,
         turbo: params.turbo,
         drawtext: params.drawtext,
+        segmentSeconds: params.segmentSeconds,
+        workDir: jobWorkDir(jobId),
         onProgress: (p) => setStatus(jobId, 'running', { progress: JSON.stringify(p) }),
       });
       // 成片直接落盘到 outputs（避免整片读进内存）
@@ -275,7 +306,7 @@ async function runJob(jobId) {
       });
       const mb = (fs.statSync(dest).size / 1048576).toFixed(1);
       log.ok(`任务完成 ${jobId.slice(0, 8)} 成片=${seconds}s 分段=${segments} 大小=${mb}MB 耗时=${((Date.now() - t0) / 1000).toFixed(1)}s`);
-      cleanupFiles(params);
+      // 已完成任务仍可指定重做第 1 段；参考素材直到删除任务才清理。
       return;
     } catch (err) {
       lastErr = err;

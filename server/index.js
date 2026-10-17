@@ -304,7 +304,8 @@ app.post('/api/generate/plan', authMiddleware, (req, res) => {
     const durClamped = Math.max(4, Math.min(rawDuration, cap));
     const durationCapped = rawDuration > cap;
 
-    const { storyboard, plans } = planSegmentPrompts({ prompt: styleApplied, mode, duration: durClamped });
+    const segmentSeconds = Math.max(4, Math.min(Number(req.body.segmentSeconds) || 15, 15));
+    const { storyboard, plans } = planSegmentPrompts({ prompt: styleApplied, mode, duration: durClamped, segmentSeconds });
     const totalSeconds = plans.reduce((a, p) => a + p.duration, 0);
     const credits = estimateCredits(totalSeconds);
 
@@ -340,6 +341,7 @@ app.post('/api/generate/plan', authMiddleware, (req, res) => {
       aspectRatio: aspectFor(size.width, size.height),
       sizeChanged: size.changed,
       mode,
+      segmentSeconds,
       credits,
       creditsMode: config.creditsMode,
       creditsPerSecond: config.creditsPerSecond,
@@ -395,11 +397,11 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
     const durClamped = Math.max(4, Math.min(rawDuration, cap));
     const durationCapped = rawDuration > cap;
     const snapped = gridDuration(durClamped);
+    const segmentSeconds = Math.max(4, Math.min(Number(req.body.segmentSeconds) || 15, 15));
     // 长视频会分段：提示要按【真实分段】给，而不是把总时长吸附成单段 15.08s。
-    const segSecs = planSegments(durClamped);
+    const segSecs = planSegments(durClamped, config.limits.maxDurationSec, segmentSeconds);
     const segGrid = segSecs.map((s) => gridDuration(s));
     const segmentCount = segGrid.length;
-
     const params = {
       width: size.width,
       height: size.height,
@@ -412,6 +414,7 @@ app.post('/api/generate', authMiddleware, upload.array('files', config.limits.ma
       seed: req.body.seed === '' || req.body.seed === undefined ? undefined : Number(req.body.seed),
       // 时长允许 4–maxDurationSec 秒（默认 1800）；超过 15 秒时后端自动分段续写并拼接；每段吸附到合法帧网格
       duration: durClamped,
+      segmentSeconds,
       requestedDuration: durClamped,
       snappedDuration: snapped.seconds,
       audioFlowShift: num(req.body.audio_flow_shift, 3.0),
@@ -483,6 +486,25 @@ app.get('/api/jobs/:id/download', authMiddleware, (req, res) => {
   const job = getJob(req.params.id, req.user.id);
   if (!job || !job.videoUrl) return res.status(404).json({ error: '视频未就绪' });
   res.download(path.join(config.outputsDir, `${job.id}.mp4`), `h3-${job.id.slice(0, 8)}.mp4`);
+});
+app.get('/api/jobs/:id/segments/:n/video', authMiddleware, (req, res) => {
+  const job = getJob(req.params.id, req.user.id);
+  const n = Number(req.params.n);
+  const segment = Number.isInteger(n) && n > 0 ? job?.segments?.[n - 1] : null;
+  if (!job || !segment || segment.status !== 'done') return res.status(404).json({ error: '分段视频不存在' });
+  const file = path.join(config.dataDir, 'jobs', job.id, `seg-${String(n).padStart(2, '0')}.mp4`);
+  if (!fs.existsSync(file)) return res.status(404).json({ error: '分段文件不存在' });
+  res.sendFile(file);
+});
+app.post('/api/jobs/:id/segments/:n/regenerate', authMiddleware, (req, res) => {
+  const r = regenerateJob(req.params.id, req.user.id, Number(req.params.n));
+  if (r.ok) return res.json({ ok: true });
+  if (r.reason === 'not_found') return res.status(404).json({ error: '任务不存在' });
+  if (r.reason === 'busy') return res.status(409).json({ error: '任务正在排队或生成中' });
+  if (r.reason === 'segment_invalid') return res.status(400).json({ error: '分段编号无效' });
+  if (r.reason === 'segment_missing') return res.status(404).json({ error: '该分段文件不存在，无法单独重做' });
+  if (r.reason === 'files_missing') return res.status(409).json({ error: '参考文件已不在，请重新上传后再提交' });
+  res.status(400).json({ error: '无法重新生成分段' });
 });
 app.post('/api/jobs/:id/regenerate', authMiddleware, (req, res) => {
   const r = regenerateJob(req.params.id, req.user.id);

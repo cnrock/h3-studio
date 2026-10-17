@@ -86,9 +86,10 @@ export function parseStoryboard(prompt) {
 }
 
 /** 不按分镜时的普通分段：每段 ∈ [4,15]，均匀分配且不丢时长 */
-export function planSegments(totalSeconds, maxTotal = config.limits.maxDurationSec) {
+export function planSegments(totalSeconds, maxTotal = config.limits.maxDurationSec, segmentMax = H3_MAX_SECONDS) {
+  const max = Math.max(4, Math.min(Number(segmentMax) || H3_MAX_SECONDS, H3_MAX_SECONDS));
   const total = Math.max(4, Math.min(Number(totalSeconds) || 0, maxTotal));
-  const n = Math.max(1, Math.ceil(total / H3_MAX_SECONDS));
+  const n = Math.max(1, Math.ceil(total / max));
   const base = Math.floor(total / n);
   let remainder = total - base * n;
   const segs = [];
@@ -510,7 +511,7 @@ export function planSegmentPrompts(o) {
   let plans; // [{ prompt, mode, duration, usePrevFrame }]
   if (storyboard) {
     // 分镜路径同样受总时长上限约束，避免超长剧本绕过限制
-    let groups = groupShots(storyboard.shots);
+    let groups = groupShots(storyboard.shots, Math.max(4, Math.min(Number(o.segmentSeconds) || H3_MAX_SECONDS, H3_MAX_SECONDS)));
     const cap = config.limits.maxDurationSec;
     let acc = 0;
     const capped = [];
@@ -536,7 +537,7 @@ export function planSegmentPrompts(o) {
       return { prompt: parts.join('\n\n'), mode: i === 0 ? o.mode : 'fl2va', duration: dur, usePrevFrame: i > 0 };
     });
   } else {
-    const segs = planSegments(o.duration).map((s) => gridDuration(s).seconds);
+    const segs = planSegments(o.duration, config.limits.maxDurationSec, o.segmentSeconds).map((s) => gridDuration(s).seconds);
     const total = segs.length;
     plans = segs.map((dur, i) => {
       const cont =
@@ -571,13 +572,41 @@ export async function generateLongVideo(o) {
     return { filePath: finalPath, segments: 1, seconds: plans[0].duration };
   }
 
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'h3-long-'));
+  const persistentWorkDir = o.workDir ? path.resolve(o.workDir) : null;
+  const workDir = persistentWorkDir || fs.mkdtempSync(path.join(os.tmpdir(), 'h3-long-'));
+  fs.mkdirSync(workDir, { recursive: true });
   const segPaths = [];
+  let resumePrefix = true;
+  const manifestPath = path.join(workDir, 'manifest.json');
+  let manifest = { segments: plans.map((p, i) => ({ index: i + 1, seconds: p.duration, status: 'pending' })), updatedAt: Date.now() };
+  if (persistentWorkDir && fs.existsSync(manifestPath)) {
+    try {
+      const previous = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      if (Array.isArray(previous.segments) && previous.segments.length === plans.length) manifest = previous;
+    } catch { /* 损坏的 manifest 从现有段文件重建 */ }
+  }
+  const saveManifest = () => { manifest.updatedAt = Date.now(); fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2)); };
+  saveManifest();
   log.info(`分段生成：共 ${plans.length} 段，计划时长 [${plans.map((p) => p.duration).join(', ')}]s 分镜=${!!storyboard}`);
 
   try {
     for (let i = 0; i < plans.length; i++) {
       const p = plans[i];
+      const segPath = path.join(workDir, `seg-${String(i + 1).padStart(2, '0')}.mp4`);
+      if (resumePrefix && fs.existsSync(segPath)) {
+        const existingDuration = await probeStreamDuration(segPath, 'v:0');
+        if (existingDuration && Math.abs(existingDuration - p.duration) < 0.25) {
+          segPaths.push(segPath);
+          manifest.segments[i] = { index: i + 1, seconds: p.duration, actualSeconds: existingDuration, status: 'done', path: segPath };
+          saveManifest();
+          onProgress({ stage: 'segment', current: i + 1, total: plans.length, seconds: p.duration, resumed: true });
+          log.info(`第 ${i + 1}/${plans.length} 段复用已完成结果：${existingDuration.toFixed(2)}s`);
+          continue;
+        }
+      }
+      // 只能从连续前缀恢复；一旦缺段，后面的旧文件不能继续沿用。
+      resumePrefix = false;
+      try { fs.unlinkSync(segPath); } catch {}
       onProgress({ stage: 'segment', current: i + 1, total: plans.length, seconds: p.duration });
       log.info(`第 ${i + 1}/${plans.length} 段开始：mode=${i === 0 ? p.mode : 'fl2va?'} 请求时长=${p.duration}s`);
 
@@ -640,10 +669,15 @@ export async function generateLongVideo(o) {
           if (attempt < 2) await new Promise((r) => setTimeout(r, 3000));
         }
       }
-      if (lastErr) throw new Error(`第 ${i + 1}/${plans.length} 段生成失败：${lastErr.message}`);
+      if (lastErr) {
+        manifest.segments[i] = { index: i + 1, seconds: p.duration, status: 'error', error: lastErr.message };
+        saveManifest();
+        throw new Error(`第 ${i + 1}/${plans.length} 段生成失败：${lastErr.message}`);
+      }
 
-      const segPath = path.join(workDir, `seg-${String(i + 1).padStart(2, '0')}.mp4`);
       fs.writeFileSync(segPath, bytes);
+      manifest.segments[i] = { index: i + 1, seconds: p.duration, status: 'done', path: segPath };
+      saveManifest();
       const vSec = await probeStreamDuration(segPath, 'v:0');
       const aSec = await probeStreamDuration(segPath, 'a:0');
       const sizeMB = (bytes.length / 1048576).toFixed(2);
@@ -666,6 +700,6 @@ export async function generateLongVideo(o) {
     fs.renameSync(renderedPath, finalPath);
     return { filePath: finalPath, segments: plans.length, seconds: plans.reduce((a, p) => a + p.duration, 0), storyboard: !!storyboard };
   } finally {
-    fs.rmSync(workDir, { recursive: true, force: true });
+    if (!persistentWorkDir) fs.rmSync(workDir, { recursive: true, force: true });
   }
 }

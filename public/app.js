@@ -485,6 +485,7 @@ function readForm() {
     num_inference_steps: $('#steps').value,
     flow_shift: $('#flowShift').value,
     duration: $('#duration').value,
+    segmentSeconds: $('#segmentSeconds').value,
     turbo: state.turbo, // Turbo 模式时传递，服务端可加 quality=high
     audio_flow_shift: $('#audioFlowShift').value,
     seed: $('#seed').value,
@@ -570,6 +571,7 @@ async function submitGenerate() {
   fd.set('num_inference_steps', f.num_inference_steps);
   fd.set('flow_shift', f.flow_shift);
   fd.set('duration', f.duration);
+  fd.set('segmentSeconds', f.segmentSeconds);
   fd.set('audio_flow_shift', f.audio_flow_shift);
   fd.set('turbo', f.turbo);
   if (f.seed) fd.set('seed', f.seed);
@@ -642,6 +644,7 @@ $('#generateBtn').onclick = async () => {
         width: f.width,
         height: f.height,
         duration: f.duration,
+        segmentSeconds: f.segmentSeconds,
         imageCount: state.files.filter((x) => x.type.startsWith('image')).length,
       }),
     });
@@ -776,6 +779,7 @@ function jobCard(j) {
       ${qaText ? `<div class="muted" style="font-size:12px;color:${qaWarn ? 'var(--warn,#d9a441)' : 'var(--ok,#4caf50)'}">${escapeHtml(qaText)}</div>` : ''}
       ${stallHint ? `<div class="muted" style="color:var(--warn,#d9a441)">${escapeHtml(stallHint)}</div>` : ''}
       ${j.error ? `<div class="muted" style="color:var(--danger)">${escapeHtml(j.error)}</div>` : ''}
+      ${j.segments?.length ? `<details><summary>分段记录（${j.segments.filter((s) => s.status === 'done').length}/${j.segments.length} 已完成）</summary>${j.segments.map((s) => `<div>第 ${s.index} 段 · ${Number(s.seconds).toFixed(2)}s · ${s.status === 'done' ? '已完成' : s.status === 'error' ? '失败' : '待生成'} ${s.status === 'done' ? `<a href="/api/jobs/${j.id}/segments/${s.index}/video" target="_blank" rel="noopener">播放</a>` : ''} ${(j.status === 'done' || j.status === 'error') && s.status === 'done' ? `<button type="button" class="ghost" data-seg-regen="${s.index}">从此段重做</button>` : ''}</div>`).join('')}</details>` : ''}
       <div class="actions" style="margin-top:auto">
         ${j.videoUrl ? `<a href="${j.downloadUrl}" download><button class="ghost">下载</button></a>` : ''}
         ${j.status === 'error' || j.status === 'running' ? `<button class="ghost" data-regen="${j.id}">重新生成</button>` : ''}
@@ -788,6 +792,16 @@ function jobCard(j) {
     loadJobs();
   };
   const regenBtn = el.querySelector('[data-regen]');
+  el.querySelectorAll('[data-seg-regen]').forEach((btn) => {
+    btn.onclick = async () => {
+      if (!confirm(`从第 ${btn.dataset.segRegen} 段重新生成？该段及其后续分段会重新生成。`)) return;
+      btn.disabled = true;
+      try {
+        await api(`/api/jobs/${j.id}/segments/${btn.dataset.segRegen}/regenerate`, { method: 'POST' });
+        loadJobs();
+      } catch (err) { alert(err.message || '重做失败'); btn.disabled = false; }
+    };
+  });
   if (regenBtn) {
     regenBtn.onclick = async () => {
       regenBtn.disabled = true;
