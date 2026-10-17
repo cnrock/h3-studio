@@ -71,7 +71,7 @@ export const config = {
   // 若只有一个后端（旧配置），所有任务都发到它；
   // 若单独配置了 H3_BASE_URL_REF2VA，则 ref2va 走该后端，其余走默认后端。
   h3: {
-    baseUrl: (process.env.H3_BASE_URL || 'http://10.1.10.34:32206').replace(/\/+$/, ''),
+    baseUrl: (process.env.H3_BASE_URL || 'http://127.0.0.1:32206').replace(/\/+$/, ''),
     // 可选：ref2va 专用后端（serve Ref2VA 分区的进程）
     ref2vaBaseUrl: (process.env.H3_BASE_URL_REF2VA || '').replace(/\/+$/, ''),
     apiKey: process.env.H3_API_KEY || '',
