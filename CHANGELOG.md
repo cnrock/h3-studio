@@ -5,6 +5,16 @@ H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到
 > README 与 CHANGELOG 的章节均使用语义化版本号（`v1.x`），不再出现早期 `v12` 之类旧编号；
 > 修复/排查类章节按真实版本号升序排列。
 
+## v1.15.1
+
+修复 VDN 首尾帧（fl2va）与分段续写被服务端 400 拒绝。
+
+- **现象**：第 2/30 段失败，`VDN 返回 400：conditions requires at least one entry for task 'fl2va'`。
+- **原因**：VDN 的 fl2va 要求在请求里显式给出 `conditions` 关键帧条目；v1.15 只把末帧放进 multipart 的 `input_reference`，服务端因此判定没有条件帧。
+- 现在按顺序构造 `conditions`：第 1 张图 `role=keyframe, frame_index=0`，第 2 张 `role=keyframe, frame_index=-1`，图片以 data URI 内联传递。
+- fl2va 在缺少图片时立刻给出本地错误，不再把无效请求发给服务端。
+- 已通过模拟服务断言 `conditions` 字段、keyframe 角色、frame_index 与 data URI 均出现在实际请求体中。
+
 ## v1.15
 
 适配 OpenVDN VDN-Minimax-H3 / SGLang Diffusion 的异步视频 API。

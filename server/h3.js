@@ -120,6 +120,31 @@ function parseJsonResponse(response) {
   try { return JSON.parse(response.buffer.toString('utf8')); } catch { return null; }
 }
 
+/**
+ * VDN 的 fl2va 必须显式给出 conditions（keyframe 条目），只上传 input_reference
+ * 会被服务端判定为“没有条件帧”而 400。图片以 data URI 传递，避免依赖服务端
+ * 本地路径；顺序语义固定：第 1 张 = 首帧(frame_index 0)，第 2 张 = 末帧(-1)。
+ */
+function buildVdnConditions(mode, files) {
+  const images = (files || []).filter(
+    (f) => /^image\//.test(f.mimetype || '') && f.buffer?.length,
+  );
+  if (!images.length) return [];
+  const toUri = (f) =>
+    `data:${f.mimetype || 'image/png'};base64,${f.buffer.toString('base64')}`;
+  if (mode === 'fl2va') {
+    const list = images.slice(0, 2).map((f, i) => ({
+      type: 'image',
+      uri: toUri(f),
+      role: 'keyframe',
+      frame_index: i === 0 ? 0 : -1,
+    }));
+    return list;
+  }
+  // VDN-H3 只服务 t2va / fl2va；ref2va 已在上游降级为 fl2va 处理。
+  return images.map((f) => ({ type: 'image', uri: toUri(f), role: 'reference' }));
+}
+
 async function generateVideoVdn(o, baseUrl, apiKey) {
   const duration = Math.min(15, Math.max(4, Number(o.duration) || 5));
   const target = {
@@ -127,9 +152,14 @@ async function generateVideoVdn(o, baseUrl, apiKey) {
     aspect_ratio: o.aspectRatio || '16:9',
     duration_seconds: duration,
   };
+  const conditions = buildVdnConditions(o.mode, o.files);
+  if (o.mode === 'fl2va' && conditions.length === 0) {
+    throw new Error('VDN fl2va 需要首帧参考图，但本次请求未携带图片');
+  }
   const extra = {
     task: o.mode,
     target,
+    conditions,
     audio_flow_shift: o.audioFlowShift ?? 3.0,
     quality: o.turbo ? 'high' : undefined,
   };
@@ -139,6 +169,7 @@ async function generateVideoVdn(o, baseUrl, apiKey) {
     task: o.mode,
     seconds: Math.round(duration),
     target: JSON.stringify(target),
+    conditions: JSON.stringify(conditions),
     num_inference_steps: 8,
     flow_shift: o.flowShift ?? 12,
     audio_flow_shift: o.audioFlowShift ?? 3.0,
@@ -146,17 +177,18 @@ async function generateVideoVdn(o, baseUrl, apiKey) {
   if (o.turbo) fields.quality = 'high';
   if (Number.isFinite(o.seed)) fields.seed = String(o.seed);
 
-  let url = `${baseUrl}/v1/videos`;
+  const url = `${baseUrl}/v1/videos`;
   let body;
   let headers = { Accept: 'application/json' };
   if (o.files?.length) {
+    // 保留 multipart 作为兼容路径：图片同时以 input_reference 提供，供只认上传字段的部署使用。
     const multipartFields = { ...fields, extra_params: JSON.stringify(extra) };
     const built = buildMultipart(multipartFields, o.files);
     body = built.body;
     headers['Content-Type'] = `multipart/form-data; boundary=${built.boundary}`;
     headers['Content-Length'] = String(body.length);
   } else {
-    body = Buffer.from(JSON.stringify({ ...fields, target, task: o.mode, model: config.h3.model }), 'utf8');
+    body = Buffer.from(JSON.stringify({ ...fields, target, conditions, task: o.mode, model: config.h3.model }), 'utf8');
     headers['Content-Type'] = 'application/json';
     headers['Content-Length'] = String(body.length);
   }

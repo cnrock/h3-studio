@@ -41,4 +41,20 @@ assert.equal(result.contentType, 'video/mp4');
 assert.equal(result.bytes.toString(), 'fake-mp4');
 assert.equal(jobs.get('vdn-test-job').count, 2);
 console.log('VDN async submit -> poll -> content: OK');
+
+// fl2va 必须携带 keyframe conditions（只给 input_reference 会被 400 拒绝）
+jobs.clear();
+const png = Buffer.from('89504e470d0a1a0a', 'hex');
+await generateVideo({
+  prompt: 'test fl2va', mode: 'fl2va', width: 1344, height: 768, aspectRatio: '16:9',
+  duration: 5, steps: 50, flowShift: 12, audioFlowShift: 3,
+  files: [{ field: 'input_reference', filename: 'first.png', mimetype: 'image/png', buffer: png }],
+});
+const fl2vaBody = jobs.get('vdn-test-job').body;
+assert.match(fl2vaBody, /name="conditions"/, 'fl2va 请求必须带 conditions 字段');
+assert.match(fl2vaBody, /"role":"keyframe"/, 'fl2va 条件必须是 keyframe');
+assert.match(fl2vaBody, /"frame_index":0/, '首帧 frame_index 应为 0');
+assert.match(fl2vaBody, /data:image\/png;base64,/, '图片应以 data URI 传递');
+console.log('VDN fl2va keyframe conditions: OK');
+
 server.close();
