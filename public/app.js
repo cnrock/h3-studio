@@ -8,7 +8,7 @@ const MODE_HINTS = {
   ref2va: '上传参考图片 / 视频片段（可混合，最多 9 个），模型会参考其主体、风格、动作。',
 };
 
-const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15, maxDurationSec: 1800, creditsMode: 'off', creditsPerSecond: 0, creditsPerJob: 0, styleMemoryChars: 2000 }, turbo: false };
+const state = { user: null, mode: 't2va', files: [], poll: null, aspectPresets: {}, frameGrid: { fps: 24, step: 17, offset: 5, minFrames: 124, maxFrames: 362 }, ref2vaTemplate: '', vdn: false, limits: { promptChars: 20000, maxImageMB: 30, maxVideoMB: 50, maxFiles: 9, maxRefVideoSec: 15, maxDurationSec: 1800, creditsMode: 'off', creditsPerSecond: 0, creditsPerJob: 0, styleMemoryChars: 2000 }, turbo: false };
 
 // 标准档（短边 768）的 Turbo 参数
 const TURBO_PARAMS = { steps: 5, flowShift: 6 };
@@ -482,7 +482,7 @@ function readForm() {
     height: h,
     aspect_ratio: $('#aspect').value,
     fps: $('#fps').value,
-    num_inference_steps: $('#steps').value,
+    num_inference_steps: state.vdn ? 8 : $('#steps').value,
     flow_shift: $('#flowShift').value,
     duration: $('#duration').value,
     segmentSeconds: $('#segmentSeconds').value,
@@ -861,6 +861,7 @@ const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&a
   try {
     const cfg = await api('/api/config');
     if (cfg && cfg.limits) state.limits = { ...state.limits, ...cfg.limits };
+    state.vdn = cfg?.h3ApiMode === 'vdn';
     if (cfg && cfg.aspectPresets) state.aspectPresets = cfg.aspectPresets;
     if (cfg && cfg.frameGrid) state.frameGrid = { ...state.frameGrid, ...cfg.frameGrid };
     // 提示词助手可用性：未配置的服务端把按钮藏起来，避免点了报错

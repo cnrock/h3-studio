@@ -84,6 +84,115 @@ function buildMultipart(fields, files) {
   return { boundary, body: Buffer.concat(parts) };
 }
 
+/** One-shot HTTP request helper used by the asynchronous VDN API. */
+function requestHttp(url, { method = 'GET', headers = {}, body = null, timeoutMs = config.h3.timeoutMs } = {}) {
+  const target = new URL(url);
+  const isHttps = target.protocol === 'https:';
+  const lib = isHttps ? https : http;
+  return new Promise((resolve, reject) => {
+    const req = lib.request({
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port || (isHttps ? 443 : 80),
+      path: target.pathname + target.search,
+      method,
+      headers,
+      agent: false,
+      timeout: timeoutMs,
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve({
+        status: res.statusCode || 0,
+        contentType: res.headers['content-type'] || '',
+        headers: res.headers,
+        buffer: Buffer.concat(chunks),
+      }));
+    });
+    req.on('timeout', () => req.destroy(new Error(`VDN 请求超时（>${timeoutMs} ms）`)));
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+function parseJsonResponse(response) {
+  try { return JSON.parse(response.buffer.toString('utf8')); } catch { return null; }
+}
+
+async function generateVideoVdn(o, baseUrl, apiKey) {
+  const duration = Math.min(15, Math.max(4, Number(o.duration) || 5));
+  const target = {
+    short_edge: 768,
+    aspect_ratio: o.aspectRatio || '16:9',
+    duration_seconds: duration,
+  };
+  const extra = {
+    task: o.mode,
+    target,
+    audio_flow_shift: o.audioFlowShift ?? 3.0,
+    quality: o.turbo ? 'high' : undefined,
+  };
+  const fields = {
+    model: config.h3.model,
+    prompt: o.prompt ?? '',
+    task: o.mode,
+    seconds: Math.round(duration),
+    target: JSON.stringify(target),
+    num_inference_steps: 8,
+    flow_shift: o.flowShift ?? 12,
+    audio_flow_shift: o.audioFlowShift ?? 3.0,
+  };
+  if (o.turbo) fields.quality = 'high';
+  if (Number.isFinite(o.seed)) fields.seed = String(o.seed);
+
+  let url = `${baseUrl}/v1/videos`;
+  let body;
+  let headers = { Accept: 'application/json' };
+  if (o.files?.length) {
+    const multipartFields = { ...fields, extra_params: JSON.stringify(extra) };
+    const built = buildMultipart(multipartFields, o.files);
+    body = built.body;
+    headers['Content-Type'] = `multipart/form-data; boundary=${built.boundary}`;
+    headers['Content-Length'] = String(body.length);
+  } else {
+    body = Buffer.from(JSON.stringify({ ...fields, target, task: o.mode, model: config.h3.model }), 'utf8');
+    headers['Content-Type'] = 'application/json';
+    headers['Content-Length'] = String(body.length);
+  }
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  const submitted = await requestHttp(url, { method: 'POST', headers, body, timeoutMs: config.h3.timeoutMs });
+  const job = parseJsonResponse(submitted);
+  if (submitted.status < 200 || submitted.status >= 300 || !job?.id) {
+    const detail = job?.error || job?.detail || submitted.buffer.toString('utf8').slice(0, 500);
+    throw new Error(`VDN 返回 ${submitted.status}：${detail}`);
+  }
+  const jobUrl = `${baseUrl}/v1/videos/${encodeURIComponent(job.id)}`;
+  const deadline = Date.now() + config.h3.pollTimeoutMs;
+  let latest = job;
+  while (Date.now() < deadline) {
+    const status = String(latest.status || '').toLowerCase();
+    if (status === 'completed' || status === 'succeeded' || status === 'done') break;
+    if (status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled') {
+      throw new Error(`VDN 任务失败：${latest.error || '未知错误'}`);
+    }
+    await sleep(Math.max(100, config.h3.pollMs));
+    const polled = await requestHttp(jobUrl, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {}, timeoutMs: Math.min(config.h3.timeoutMs, 30_000) });
+    latest = parseJsonResponse(polled) || latest;
+    if (polled.status >= 400) throw new Error(`VDN 查询任务失败 ${polled.status}：${polled.buffer.toString('utf8').slice(0, 300)}`);
+  }
+  if (!['completed', 'succeeded', 'done'].includes(String(latest.status || '').toLowerCase())) {
+    throw new Error(`VDN 任务轮询超时（>${config.h3.pollTimeoutMs} ms，任务 ${job.id}）`);
+  }
+  const contentUrl = latest.url && /^https?:/.test(latest.url) ? latest.url : `${jobUrl}/content`;
+  const content = await requestHttp(contentUrl, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {}, timeoutMs: config.h3.timeoutMs });
+  if (content.status < 200 || content.status >= 300 || !content.buffer.length) {
+    throw new Error(`VDN 下载视频失败 ${content.status}：${content.buffer.toString('utf8').slice(0, 300)}`);
+  }
+  return { bytes: content.buffer, contentType: content.contentType || 'video/mp4' };
+}
+
 /**
  * @param {object} o
  * @param {string} o.prompt
@@ -101,6 +210,12 @@ function buildMultipart(fields, files) {
  * @returns {Promise<{bytes:Buffer, contentType:string}>}
  */
 export async function generateVideo(o) {
+  if (config.h3.apiMode !== 'legacy') {
+    const useRef2va = o.mode === 'ref2va' && config.h3.ref2vaBaseUrl;
+    const baseUrl = useRef2va ? config.h3.ref2vaBaseUrl : config.h3.baseUrl;
+    const apiKey = useRef2va ? config.h3.ref2vaApiKey : config.h3.apiKey;
+    return generateVideoVdn(o, baseUrl, apiKey);
+  }
   const t0 = Date.now();
   const fields = {
     prompt: o.prompt ?? '',

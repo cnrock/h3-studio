@@ -641,7 +641,10 @@ export async function generateLongVideo(o) {
           //   后续段但抽帧失败 -> t2va（无任何参考文件）
           // 早前版本把第 1 段硬编码为 t2va，导致 ref2va/fl2va 的参考文件
           // 被发给 t2va 而报 “t2va does not accept image/video/audio conditions”。
-          const segMode = i === 0 ? p.mode : (usePrev ? 'fl2va' : 't2va');
+          // VDN-H3 supports t2va/fl2va; a later segment is always fl2va when
+          // its previous-frame condition is available. Ref2va-like references
+          // are sent only on the first segment; VDN does not accept video refs.
+          const segMode = i === 0 ? (p.mode === 'ref2va' ? 'fl2va' : p.mode) : (usePrev ? 'fl2va' : 't2va');
           // fl2va 必须在正文前注入官方对齐指令（首帧->0.00s，末帧->duration）
           const segPrompt = segMode === 'fl2va'
             ? injectFl2vaAlignment(p.prompt, { imageCount: files.filter((f) => /^image\//.test(f.mimetype || '')).length, duration: p.duration })

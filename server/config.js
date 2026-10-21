@@ -72,6 +72,11 @@ export const config = {
   // 若单独配置了 H3_BASE_URL_REF2VA，则 ref2va 走该后端，其余走默认后端。
   h3: {
     baseUrl: (process.env.H3_BASE_URL || 'http://127.0.0.1:32206').replace(/\/+$/, ''),
+    // vdn = SGLang/VDN asynchronous /v1/videos API; legacy = old /v1/videos/sync multipart API.
+    apiMode: String(process.env.H3_API_MODE || 'vdn').toLowerCase(),
+    model: process.env.H3_MODEL || 'vdn-minimax-h3',
+    pollMs: int(process.env.H3_POLL_MS, 1000),
+    pollTimeoutMs: int(process.env.H3_POLL_TIMEOUT_MS, 30 * 60 * 1000),
     // 可选：ref2va 专用后端（serve Ref2VA 分区的进程）
     ref2vaBaseUrl: (process.env.H3_BASE_URL_REF2VA || '').replace(/\/+$/, ''),
     apiKey: process.env.H3_API_KEY || '',

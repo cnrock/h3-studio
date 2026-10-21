@@ -5,6 +5,17 @@ H3 Studio 遵循小版本号约定：常规迭代 `v1.x`，重大更新才升到
 > README 与 CHANGELOG 的章节均使用语义化版本号（`v1.x`），不再出现早期 `v12` 之类旧编号；
 > 修复/排查类章节按真实版本号升序排列。
 
+## v1.15
+
+适配 OpenVDN VDN-Minimax-H3 / SGLang Diffusion 的异步视频 API。
+
+- 默认从旧的 `POST /v1/videos/sync` 切换为 `POST /v1/videos`。
+- 生成流程改为提交任务、轮询 `GET /v1/videos/{id}`、完成后下载 `/content`。
+- 默认模型名为 `vdn-minimax-h3`，`H3_BASE_URL` 保持不变。
+- VDN 模式自动使用 8 步采样；旧后端可设置 `H3_API_MODE=legacy` 保持兼容。
+- 新增 `H3_POLL_MS` 与 `H3_POLL_TIMEOUT_MS`，用于控制异步任务轮询。
+- 已通过隔离模拟服务的提交、排队、完成、视频下载端到端测试；真实 VDN GPU 生成仍需部署环境验证。
+
 ## v1.14
 
 长视频分段持久化与断点续跑。Docker 镜像：`cnrock/h3-studio:1.14`（linux/amd64、linux/arm64）。

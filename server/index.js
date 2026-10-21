@@ -542,6 +542,7 @@ app.get('/api/config', (_req, res) => {
       creditsPerSecond: config.creditsPerSecond,
       creditsPerJob: config.creditsPerJob,
       styleMemoryChars: config.limits.styleMemoryChars,
+      h3ApiMode: config.h3.apiMode,
     },
     // 分辨率预设（按画幅比例）、帧网格、对齐粒度 —— 供前端联动与提示
     aspectPresets: presetsForClient(),
